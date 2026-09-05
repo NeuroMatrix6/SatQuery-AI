@@ -1,15 +1,12 @@
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
-import {
-  Stars,
-  useGLTF,
-  Environment,
-} from "@react-three/drei";
+import { Stars, useGLTF, Environment } from "@react-three/drei";
 import * as THREE from "three";
 import { useMemo, useRef } from "react";
 
-/* =========================
+
+/* =========================================================
    EARTH
-========================= */
+========================================================= */
 
 function Earth() {
   const earthRef = useRef();
@@ -30,9 +27,10 @@ function Earth() {
       ref={earthRef}
       position={[0, -3.3, -3]}
     >
+
       {/* EARTH */}
       <mesh>
-        <sphereGeometry args={[3.5, 128, 128]} />
+        <sphereGeometry args={[4.5, 128, 128]} />
 
         <meshStandardMaterial
           map={earthTexture}
@@ -41,66 +39,107 @@ function Earth() {
         />
       </mesh>
 
+
       {/* ATMOSPHERE */}
       <mesh scale={1.045}>
-        <sphereGeometry args={[3.5, 128, 128]} />
+
+        <sphereGeometry args={[4.5, 128, 128]} />
 
         <meshBasicMaterial
           color="#168cff"
           transparent
-          opacity={0.10}
+          opacity={0.14}
           side={THREE.BackSide}
         />
+
       </mesh>
+
     </group>
   );
 }
 
 
-/* =========================
+/* =========================================================
    ORBIT
-========================= */
+========================================================= */
 
 function Orbit() {
+
+  const orbitGroupRef = useRef();
+
+  const earthPosition = new THREE.Vector3(
+    0,
+    -3.3,
+    -3
+  );
+
+  const radiusX = 7.2;
+  const radiusZ = 4.8;
+
   const points = [];
 
-  const radiusX = 6.2;
-  const radiusZ = 3.4;
+  /*
+    Create a smooth 3D elliptical orbit.
+  */
 
-  const centerY = -1.3;
-
-  for (let i = 0; i <= 160; i++) {
+  for (let i = 0; i <= 240; i++) {
 
     const angle =
-      (i / 160) * Math.PI * 2;
+      (i / 240) * Math.PI * 2;
 
-    points.push(
+    const x =
+      Math.cos(angle) * radiusX;
+
+    const z =
+      Math.sin(angle) * radiusZ;
+
+    const localPoint =
       new THREE.Vector3(
-        Math.cos(angle) * radiusX,
-        centerY,
-        Math.sin(angle) * radiusZ - 3
+        x,
+        0,
+        z
+      );
+
+    /*
+      Tilt orbit so it looks
+      like a real 3D orbital path.
+    */
+
+    localPoint.applyEuler(
+      new THREE.Euler(
+        0.55,
+        0.0,
+        -0.32
       )
     );
+
+    localPoint.add(earthPosition);
+
+    points.push(localPoint);
   }
 
   const geometry =
     new THREE.BufferGeometry().setFromPoints(points);
 
+
   return (
-    <line geometry={geometry}>
+    <line
+      geometry={geometry}
+      ref={orbitGroupRef}
+    >
       <lineBasicMaterial
         color="#148bff"
         transparent
-        opacity={0.45}
+        opacity={0.55}
       />
     </line>
   );
 }
 
 
-/* =========================
+/* =========================================================
    SATELLITE
-========================= */
+========================================================= */
 
 function Satellite() {
 
@@ -111,8 +150,8 @@ function Satellite() {
 
 
   /*
-    Clone the model so we can
-    safely modify its scale.
+    Clone GLB so the original
+    model remains untouched.
   */
 
   const satellite = useMemo(() => {
@@ -121,7 +160,7 @@ function Satellite() {
       scene.clone(true);
 
     /*
-      Find actual GLB dimensions
+      Calculate actual model size.
     */
 
     const box =
@@ -134,10 +173,6 @@ function Satellite() {
     box.getSize(size);
 
 
-    /*
-      Find largest dimension
-    */
-
     const largestDimension =
       Math.max(
         size.x,
@@ -147,75 +182,101 @@ function Satellite() {
 
 
     /*
-      Earth diameter = 5.3
-
-      Satellite desired size
-      = approximately 0.65
-
-      So satellite is clearly
-      smaller than Earth.
+      Satellite stays smaller
+      than the Earth.
     */
 
     const desiredSize = 1.10;
-
 
     const scale =
       desiredSize /
       largestDimension;
 
-
     model.scale.setScalar(scale);
-
 
     return model;
 
   }, [scene]);
 
 
-  /* =========================
-     SATELLITE MOVEMENT
-  ========================= */
+  /* =======================================================
+     FULL 360° ORBIT
+  ======================================================= */
 
   useFrame(({ clock }) => {
 
     const t =
       clock.getElapsedTime();
 
+    const earthX = 0;
+    const earthY = -3.3;
+    const earthZ = -3;
 
-    const radiusX = 6.2;
-    const radiusZ = 3.4;
+    const radiusX = 7.2;
+    const radiusZ = 4.8;
 
-    const centerY = -1.3;
-
-    const speed = 0.30;
+    const speed = 0.34;
 
     const angle =
       t * speed;
 
 
+    /*
+      Base elliptical position.
+    */
+
+    const position =
+      new THREE.Vector3(
+        Math.cos(angle) * radiusX,
+        0,
+        Math.sin(angle) * radiusZ
+      );
+
+
+    /*
+      Same 3D tilt as orbit.
+    */
+
+    position.applyEuler(
+      new THREE.Euler(
+        0.55,
+        0.0,
+        -0.32
+      )
+    );
+
+
+    /*
+      Move around Earth's center.
+    */
+
+    position.x += earthX;
+    position.y += earthY;
+    position.z += earthZ;
+
+
     if (satelliteRef.current) {
 
-      /*
-        Move around Earth
-      */
-
-      satelliteRef.current.position.x =
-        Math.cos(angle) * radiusX;
-
-
-      satelliteRef.current.position.z =
-        Math.sin(angle) * radiusZ - 3;
-
-
-      satelliteRef.current.position.y =
-        centerY;
+      satelliteRef.current.position.copy(
+        position
+      );
 
 
       /*
-        Satellite rotation
+        Rotate satellite around
+        its own axis.
       */
 
       satelliteRef.current.rotation.y += 0.008;
+
+
+      /*
+        Slight floating / orientation
+        effect for a more natural look.
+      */
+
+      satelliteRef.current.rotation.x =
+        Math.sin(t * 0.7) * 0.08;
 
     }
 
@@ -230,7 +291,7 @@ function Satellite() {
         rotation={[
           0,
           Math.PI / 2,
-          0,
+          0
         ]}
       />
 
@@ -239,18 +300,18 @@ function Satellite() {
 }
 
 
-/* =========================
+/* =========================================================
    PRELOAD
-========================= */
+========================================================= */
 
 useGLTF.preload(
   "/models/satellite.glb"
 );
 
 
-/* =========================
+/* =========================================================
    LIGHTING
-========================= */
+========================================================= */
 
 function SceneLights() {
 
@@ -258,17 +319,17 @@ function SceneLights() {
     <>
 
       <ambientLight
-        intensity={0.35}
+        intensity={0.40}
       />
 
       <directionalLight
-        position={[5, 6, 5]}
-        intensity={2.2}
+        position={[6, 8, 6]}
+        intensity={2.4}
       />
 
       <pointLight
-        position={[-5, 2, 4]}
-        intensity={1.2}
+        position={[-6, 3, 5]}
+        intensity={1.4}
         color="#4da6ff"
       />
 
@@ -277,16 +338,16 @@ function SceneLights() {
 }
 
 
-/* =========================
+/* =========================================================
    SCENE
-========================= */
+========================================================= */
 
 function Scene() {
 
   return (
     <>
 
-      {/* SPACE */}
+      {/* SPACE BACKGROUND */}
 
       <color
         attach="background"
@@ -294,35 +355,43 @@ function Scene() {
       />
 
 
-      {/* LIGHTS */}
+      {/* LIGHTING */}
 
       <SceneLights />
 
 
-      {/* STARS */}
+      {/* =====================================================
+          STARS
+      ====================================================== */}
 
       <Stars
-        radius={100}
-        depth={60}
-        count={6000}
-        factor={2.5}
+        radius={130}
+        depth={100}
+        count={10000}
+        factor={3.2}
         saturation={0}
-        fade
-        speed={0.25}
+        fade={false}
+        speed={0.12}
       />
 
 
-      {/* EARTH */}
+      {/* =====================================================
+          EARTH
+      ====================================================== */}
 
       <Earth />
 
 
-      {/* ORBIT */}
+      {/* =====================================================
+          ORBIT
+      ====================================================== */}
 
       <Orbit />
 
 
-      {/* SATELLITE */}
+      {/* =====================================================
+          SATELLITE
+      ====================================================== */}
 
       <Satellite />
 
@@ -338,9 +407,9 @@ function Scene() {
 }
 
 
-/* =========================
+/* =========================================================
    EARTH SCENE
-========================= */
+========================================================= */
 
 export default function EarthScene() {
 
@@ -360,9 +429,9 @@ export default function EarthScene() {
           position: [
             0,
             0.8,
-            12
+            13.5
           ],
-          fov: 42,
+          fov: 44,
         }}
 
         dpr={[1, 1.5]}
@@ -371,17 +440,6 @@ export default function EarthScene() {
         <Scene />
 
       </Canvas>
-
-
-      {/* DARK OVERLAY */}
-
-      <div
-        className="
-          absolute
-          inset-0
-          bg-black/20
-        "
-      />
 
     </div>
   );

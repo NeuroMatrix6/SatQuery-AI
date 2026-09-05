@@ -63,20 +63,6 @@ function Home() {
             New Analysis
           </Link>
 
-          <a
-            href="#features"
-            className="transition hover:text-white"
-          >
-            About
-          </a>
-
-          <a
-            href="#features"
-            className="transition hover:text-white"
-          >
-            Features
-          </a>
-
         </div>
 
       </nav>
@@ -112,8 +98,9 @@ function Home() {
 
         <p className="mt-6 max-w-2xl text-lg leading-8 text-gray-300">
 
-          Ask questions, detect changes, and analyze optical
-          and SAR satellite imagery using intelligent AI tools.
+          Ask questions about satellite imagery,
+          detect changes between observations,
+          and understand Earth scenes using intelligent AI tools.
 
         </p>
 
@@ -152,30 +139,28 @@ function Home() {
 
 
         {/* ===================================================
-            FEATURE CARDS
+            WORKING FEATURES
         ==================================================== */}
 
-        <div
-          id="features"
-          className="mt-20 grid w-full max-w-5xl gap-5 md:grid-cols-3"
-        >
+        <div className="mt-20 grid w-full max-w-4xl gap-5 md:grid-cols-2">
+
+          {/* IMAGE UNDERSTANDING */}
 
           <Feature
             icon="🌍"
             title="Image Understanding"
-            description="Ask natural-language questions about satellite imagery."
+            description="Upload satellite imagery and ask natural-language questions using AI."
+            path="/analysis/image"
           />
+
+
+          {/* CHANGE DETECTION */}
 
           <Feature
             icon="🔄"
             title="Change Detection"
-            description="Compare satellite images from different dates."
-          />
-
-          <Feature
-            icon="🛰️"
-            title="Optical + SAR"
-            description="Combine complementary satellite modalities for analysis."
+            description="Compare satellite images from different dates and identify visual changes."
+            path="/analysis/change"
           />
 
         </div>
@@ -188,15 +173,21 @@ function Home() {
 
 
 /* =========================================================
-   FEATURE CARD
+   CLICKABLE FEATURE CARD
 ========================================================= */
 
-function Feature({ icon, title, description }) {
-
+function Feature({
+  icon,
+  title,
+  description,
+  path,
+}) {
   return (
-
-    <div
+    <Link
+      to={path}
       className="
+        group
+        block
         rounded-2xl
         border
         border-white/10
@@ -232,8 +223,20 @@ function Feature({ icon, title, description }) {
         {description}
       </p>
 
-    </div>
 
+      {/* Open Analysis */}
+
+      <div className="mt-5 text-sm font-medium text-blue-400">
+
+        Open Analysis
+
+        <span className="ml-2 inline-block transition-transform duration-300 group-hover:translate-x-1">
+          →
+        </span>
+
+      </div>
+
+    </Link>
   );
 }
 
