@@ -237,7 +237,7 @@ export default function ChangeDetection() {
       formData.append("after_date", afterDate || "");
 
       const changeResponse = await fetch(
-        "http://127.0.0.1:8000/api/change-detection",
+        "https://satquery-ai-backend-r165.onrender.com/api/change-detection",
         {
           method: "POST",
           body: formData,
@@ -311,7 +311,7 @@ export default function ChangeDetection() {
       );
 
       const aiResponse = await fetch(
-        "http://127.0.0.1:8000/api/change-interpretation",
+        "https://satquery-ai-backend-r165.onrender.com/api/change-interpretation",
         {
           method: "POST",
           body: aiFormData,

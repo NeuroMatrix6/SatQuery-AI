@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://satquery-ai-backend-r165.onrender.com";
 
 export async function askVQA({ file, question }) {
   if (!file) throw new Error("Please select a satellite image.");
@@ -14,6 +14,7 @@ export async function askVQA({ file, question }) {
   });
 
   let data = null;
+
   try {
     data = await response.json();
   } catch {
@@ -21,7 +22,9 @@ export async function askVQA({ file, question }) {
   }
 
   if (!response.ok || data?.success === false) {
-    throw new Error(data?.error || `AI API error: ${response.status}`);
+    throw new Error(
+      data?.error || `AI API error: ${response.status}`
+    );
   }
 
   return data;
@@ -29,6 +32,10 @@ export async function askVQA({ file, question }) {
 
 export async function checkHealth() {
   const response = await fetch(`${API_BASE}/api/health`);
-  if (!response.ok) throw new Error("Backend is not reachable.");
+
+  if (!response.ok) {
+    throw new Error("Backend is not reachable.");
+  }
+
   return response.json();
 }
