@@ -50,7 +50,9 @@ export async function askVQA({ file, question }) {
    Sentinel-2:
    B04 = Red
    B08 = NIR
-   Formula = (NIR - Red) / (NIR + Red)
+
+   Formula:
+   NDVI = (NIR - Red) / (NIR + Red)
    ========================================================= */
 
 export async function analyzeNDVI({ scene, areaBounds }) {
@@ -138,7 +140,9 @@ export async function analyzeNDVI({ scene, areaBounds }) {
    Sentinel-2:
    B03 = Green
    B08 = NIR
-   Formula = (Green - NIR) / (Green + NIR)
+
+   Formula:
+   NDWI = (Green - NIR) / (Green + NIR)
    ========================================================= */
 
 export async function analyzeNDWI({ scene, areaBounds }) {
@@ -216,6 +220,98 @@ export async function analyzeNDWI({ scene, areaBounds }) {
       data?.error ||
         data?.message ||
         `NDWI API error: ${response.status}`
+    );
+  }
+
+  return data;
+}
+
+
+/* =========================================================
+   NDBI ANALYSIS
+   Sentinel-2:
+   B11 = SWIR
+   B08 = NIR
+
+   Formula:
+   NDBI = (SWIR - NIR) / (SWIR + NIR)
+   ========================================================= */
+
+export async function analyzeNDBI({ scene, areaBounds }) {
+  if (!scene) {
+    throw new Error("No Sentinel-2 scene selected.");
+  }
+
+  if (
+    !areaBounds ||
+    !Array.isArray(areaBounds) ||
+    areaBounds.length !== 2
+  ) {
+    throw new Error(
+      "Valid AOI bounds are required for NDBI."
+    );
+  }
+
+  const acquisitionDate =
+    scene.acquisition_date ||
+    scene.acquisitionDate ||
+    scene.properties?.datetime ||
+    "";
+
+  if (!acquisitionDate) {
+    throw new Error(
+      "Selected Sentinel-2 scene does not have an acquisition date."
+    );
+  }
+
+  /*
+    areaBounds format:
+
+    [
+      [south, west],
+      [north, east]
+    ]
+  */
+
+  const west = areaBounds[0][1];
+  const south = areaBounds[0][0];
+  const east = areaBounds[1][1];
+  const north = areaBounds[1][0];
+
+  const formData = new FormData();
+
+  formData.append("west", String(west));
+  formData.append("south", String(south));
+  formData.append("east", String(east));
+  formData.append("north", String(north));
+  formData.append(
+    "acquisition_date",
+    acquisitionDate
+  );
+
+  const response = await fetch(
+    `${API_BASE}/api/satellite-ndbi`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `NDBI backend returned HTTP ${response.status}.`
+    );
+  }
+
+  if (!response.ok || data?.success === false) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        `NDBI API error: ${response.status}`
     );
   }
 

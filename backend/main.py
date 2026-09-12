@@ -2976,6 +2976,570 @@ function evaluatePixel(sample) {
                 str(exc),
         }
 # ============================================================
+# SENTINEL-2 NDBI ANALYSIS
+# ============================================================
+
+@app.post("/api/satellite-ndbi")
+async def satellite_ndbi(
+    west: float = Form(...),
+    south: float = Form(...),
+    east: float = Form(...),
+    north: float = Form(...),
+    acquisition_date: str = Form(...),
+):
+    """
+    Calculate NDBI from Sentinel-2 L2A.
+
+    B11 = SWIR
+    B08 = NIR
+
+    NDBI = (SWIR - NIR) / (SWIR + NIR)
+    """
+
+    global CDSE_ACCESS_TOKEN
+    global CDSE_TOKEN_EXPIRES_AT
+
+    # --------------------------------------------------------
+    # VALIDATE COORDINATES
+    # --------------------------------------------------------
+
+    try:
+        west = float(west)
+        south = float(south)
+        east = float(east)
+        north = float(north)
+
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "error": "Invalid AOI coordinates.",
+        }
+
+    if not (
+        -180 <= west <= 180
+        and -180 <= east <= 180
+        and -90 <= south <= 90
+        and -90 <= north <= 90
+    ):
+        return {
+            "success": False,
+            "error": "Coordinates are outside valid WGS84 limits.",
+        }
+
+    if west >= east:
+        return {
+            "success": False,
+            "error": "West must be less than East.",
+        }
+
+    if south >= north:
+        return {
+            "success": False,
+            "error": "South must be less than North.",
+        }
+
+    # --------------------------------------------------------
+    # VALIDATE DATE
+    # --------------------------------------------------------
+
+    acquisition_date = (
+        acquisition_date or ""
+    ).strip()
+
+    if not acquisition_date:
+        return {
+            "success": False,
+            "error": "Acquisition date is required.",
+        }
+
+    date_only = acquisition_date[:10]
+
+    from datetime import datetime
+
+    try:
+        datetime.strptime(
+            date_only,
+            "%Y-%m-%d",
+        )
+
+    except ValueError:
+        return {
+            "success": False,
+            "error": (
+                "Invalid acquisition date. "
+                "Expected YYYY-MM-DD."
+            ),
+        }
+
+    # --------------------------------------------------------
+    # AUTHENTICATION
+    # --------------------------------------------------------
+
+    try:
+        access_token = get_cdse_access_token()
+
+    except Exception as exc:
+        print(
+            "CDSE NDBI AUTH ERROR:",
+            str(exc),
+        )
+
+        return {
+            "success": False,
+            "error": (
+                "Unable to authenticate with "
+                "Copernicus Data Space."
+            ),
+            "details": str(exc),
+        }
+
+    # --------------------------------------------------------
+    # NDBI EVALSCRIPT
+    #
+    # B11 = SWIR
+    # B08 = NIR
+    #
+    # SCL cloud masking
+    # --------------------------------------------------------
+
+    evalscript = """
+//VERSION=3
+
+function setup() {
+  return {
+    input: [
+      "B08",
+      "B11",
+      "SCL"
+    ],
+    output: {
+      bands: 1,
+      sampleType: "FLOAT32"
+    }
+  };
+}
+
+function evaluatePixel(sample) {
+
+  if (
+    sample.SCL === 3 ||
+    sample.SCL === 8 ||
+    sample.SCL === 9 ||
+    sample.SCL === 10 ||
+    sample.SCL === 11
+  ) {
+    return [-9999];
+  }
+
+  var nir = sample.B08;
+  var swir = sample.B11;
+
+  var denominator = swir + nir;
+
+  if (denominator === 0) {
+    return [-9999];
+  }
+
+  var ndbi = (swir - nir) / denominator;
+
+  return [ndbi];
+}
+"""
+
+    # --------------------------------------------------------
+    # COPERNICUS PROCESS REQUEST
+    # --------------------------------------------------------
+
+    request_body = {
+        "input": {
+            "bounds": {
+                "bbox": [
+                    west,
+                    south,
+                    east,
+                    north,
+                ],
+                "properties": {
+                    "crs":
+                        "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                },
+            },
+
+            "data": [
+                {
+                    "type":
+                        "sentinel-2-l2a",
+
+                    "dataFilter": {
+                        "timeRange": {
+                            "from":
+                                f"{date_only}T00:00:00Z",
+
+                            "to":
+                                f"{date_only}T23:59:59Z",
+                        },
+
+                        "mosaickingOrder":
+                            "leastCC",
+                    },
+                }
+            ],
+        },
+
+        "output": {
+            "width": 768,
+            "height": 768,
+
+            "responses": [
+                {
+                    "identifier": "default",
+
+                    "format": {
+                        "type":
+                            "image/tiff"
+                    },
+                }
+            ],
+        },
+
+        "evalscript":
+            evalscript,
+    }
+
+    headers = {
+        "Authorization":
+            f"Bearer {access_token}",
+
+        "Content-Type":
+            "application/json",
+
+        "Accept":
+            "image/tiff",
+    }
+
+    # --------------------------------------------------------
+    # CALL COPERNICUS PROCESS API
+    # --------------------------------------------------------
+
+    try:
+
+        response = requests.post(
+            CDSE_PROCESS_URL,
+            headers=headers,
+            json=request_body,
+            timeout=180,
+        )
+
+        print(
+            "CDSE NDBI STATUS:",
+            response.status_code,
+        )
+
+        # ----------------------------------------------------
+        # TOKEN EXPIRED -> REFRESH
+        # ----------------------------------------------------
+
+        if response.status_code == 401:
+
+            CDSE_ACCESS_TOKEN = None
+            CDSE_TOKEN_EXPIRES_AT = 0
+
+            access_token = (
+                get_cdse_access_token()
+            )
+
+            headers["Authorization"] = (
+                f"Bearer {access_token}"
+            )
+
+            response = requests.post(
+                CDSE_PROCESS_URL,
+                headers=headers,
+                json=request_body,
+                timeout=180,
+            )
+
+            print(
+                "CDSE NDBI RETRY STATUS:",
+                response.status_code,
+            )
+
+        # ----------------------------------------------------
+        # ERROR
+        # ----------------------------------------------------
+
+        if response.status_code != 200:
+
+            try:
+                details = response.json()
+
+            except Exception:
+                details = response.text[:3000]
+
+            return {
+                "success": False,
+                "error": (
+                    "Sentinel-2 NDBI request failed: "
+                    f"{response.status_code}"
+                ),
+                "details": details,
+            }
+
+        # ----------------------------------------------------
+        # READ TIFF
+        # ----------------------------------------------------
+
+        if not response.content:
+            return {
+                "success": False,
+                "error":
+                    "Copernicus returned empty NDBI data.",
+            }
+
+        try:
+
+            image = Image.open(
+                io.BytesIO(response.content)
+            )
+
+            image = image.convert("F")
+
+            ndbi_array = np.array(
+                image,
+                dtype=np.float32,
+            )
+
+        except Exception as exc:
+
+            return {
+                "success": False,
+                "error":
+                    "Unable to decode NDBI TIFF.",
+                "details": str(exc),
+            }
+
+        # ----------------------------------------------------
+        # VALID PIXELS
+        # ----------------------------------------------------
+
+        valid_mask = (
+            np.isfinite(ndbi_array)
+            &
+            (ndbi_array > -1.0)
+            &
+            (ndbi_array <= 1.0)
+        )
+
+        valid_values = (
+            ndbi_array[valid_mask]
+        )
+
+        if valid_values.size == 0:
+
+            return {
+                "success": False,
+                "error":
+                    "No valid NDBI pixels were returned.",
+            }
+
+        # ----------------------------------------------------
+        # STATISTICS
+        # ----------------------------------------------------
+
+        mean_ndbi = float(
+            np.mean(valid_values)
+        )
+
+        min_ndbi = float(
+            np.min(valid_values)
+        )
+
+        max_ndbi = float(
+            np.max(valid_values)
+        )
+
+        # ----------------------------------------------------
+        # BUILT-UP MASK
+        #
+        # NDBI > 0.20 = built-up indication
+        # ----------------------------------------------------
+
+        builtup_pixels = (
+            valid_values > 0.20
+        ).sum()
+
+        total_valid_pixels = (
+            valid_values.size
+        )
+
+        builtup_percentage = (
+            builtup_pixels
+            / total_valid_pixels
+        ) * 100
+
+        # ----------------------------------------------------
+        # BUILT-UP STATUS
+        # ----------------------------------------------------
+
+        if mean_ndbi >= 0.40:
+
+            builtup_status = (
+                "Very High Built-up Intensity"
+            )
+
+        elif mean_ndbi >= 0.20:
+
+            builtup_status = (
+                "High Built-up Intensity"
+            )
+
+        elif mean_ndbi >= 0.00:
+
+            builtup_status = (
+                "Moderate Built-up Intensity"
+            )
+
+        else:
+
+            builtup_status = (
+                "Low Built-up Intensity"
+            )
+
+        # ----------------------------------------------------
+        # CREATE NDBI VISUALIZATION
+        # ----------------------------------------------------
+
+        clipped = np.clip(
+            ndbi_array,
+            -1.0,
+            1.0,
+        )
+
+        normalized = (
+            (clipped + 1.0)
+            / 2.0
+            * 255.0
+        ).astype(np.uint8)
+
+        colored = cv2.applyColorMap(
+            normalized,
+            cv2.COLORMAP_TURBO,
+        )
+
+        colored = cv2.cvtColor(
+            colored,
+            cv2.COLOR_BGR2RGB,
+        )
+
+        invalid_mask = ~valid_mask
+
+        colored[
+            invalid_mask
+        ] = [0, 0, 0]
+
+        ndbi_map = Image.fromarray(
+            colored,
+            mode="RGB",
+        )
+
+        # ----------------------------------------------------
+        # ENCODE NDBI MAP
+        # ----------------------------------------------------
+
+        output = io.BytesIO()
+
+        ndbi_map.save(
+            output,
+            format="PNG",
+            optimize=True,
+        )
+
+        encoded = base64.b64encode(
+            output.getvalue()
+        ).decode("utf-8")
+
+        image_data_url = (
+            "data:image/png;base64,"
+            + encoded
+        )
+
+        # ----------------------------------------------------
+        # RESULT
+        # ----------------------------------------------------
+
+        return {
+            "success": True,
+
+            "date":
+                date_only,
+
+            "product":
+                "Sentinel-2 L2A",
+
+            "bands": [
+                "B11",
+                "B08",
+            ],
+
+            "formula":
+                "(B11 - B08) / (B11 + B08)",
+
+            "mean_ndbi":
+                round(
+                    mean_ndbi,
+                    4,
+                ),
+
+            "min_ndbi":
+                round(
+                    min_ndbi,
+                    4,
+                ),
+
+            "max_ndbi":
+                round(
+                    max_ndbi,
+                    4,
+                ),
+
+            "builtup_percentage":
+                round(
+                    float(
+                        builtup_percentage
+                    ),
+                    2,
+                ),
+
+            "builtup_status":
+                builtup_status,
+
+            "valid_pixels":
+                int(total_valid_pixels),
+
+            "width":
+                int(ndbi_array.shape[1]),
+
+            "height":
+                int(ndbi_array.shape[0]),
+
+            "ndbi_map":
+                image_data_url,
+        }
+
+    except Exception as exc:
+
+        print(
+            "NDBI PROCESS ERROR:",
+            str(exc),
+        )
+
+        return {
+            "success": False,
+            "error":
+                "Unexpected Sentinel-2 NDBI error.",
+            "details": str(exc),
+        }
+# ============================================================
 # VQA
 # ============================================================
 

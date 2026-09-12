@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { askVQA, analyzeNDVI, analyzeNDWI } from "../services/ai";
+import {
+  askVQA,
+  analyzeNDVI,
+  analyzeNDWI,
+  analyzeNDBI,
+} from "../services/ai";
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 
@@ -44,19 +49,30 @@ export default function ImageAnalysis() {
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState("");
   const [dimensions, setDimensions] = useState("");
+
   const [question, setQuestion] = useState(
     "Give an overall analysis of this satellite image. Identify visible land cover, vegetation, water bodies, buildings, roads, agriculture and any notable spatial patterns."
   );
+
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [answer, setAnswer] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
   const [activeScene, setActiveScene] = useState(null);
   const [activeAreaBounds, setActiveAreaBounds] = useState(null);
+
+  // NDVI
   const [ndviResult, setNdviResult] = useState(null);
   const [ndviError, setNdviError] = useState("");
+
+  // NDWI
   const [ndwiResult, setNdwiResult] = useState(null);
   const [ndwiError, setNdwiError] = useState("");
+
+  // NDBI
+  const [ndbiResult, setNdbiResult] = useState(null);
+  const [ndbiError, setNdbiError] = useState("");
 
   // =========================================================
   // PROCESS IMAGE
@@ -67,14 +83,20 @@ export default function ImageAnalysis() {
 
     setError("");
     setAnswer(null);
+
     setNdviResult(null);
     setNdviError("");
+
     setNdwiResult(null);
     setNdwiError("");
+
+    setNdbiResult(null);
+    setNdbiError("");
 
     if (!options.keepScene) {
       setActiveScene(null);
       setActiveAreaBounds(null);
+
       sessionStorage.removeItem("satquery_active_scene");
     }
 
@@ -122,116 +144,121 @@ export default function ImageAnalysis() {
 
       img.src = url;
     } else {
-      setDimensions(`${ext.replace(".", "").toUpperCase()} satellite image`);
+      setDimensions(
+        `${ext.replace(".", "").toUpperCase()} satellite image`
+      );
     }
   };
+
   // =========================================================
-// LOAD SENTINEL-2 SCENE FROM GEOLOCATION
-// =========================================================
+  // LOAD SENTINEL-2 SCENE FROM GEOLOCATION
+  // =========================================================
 
-useEffect(() => {
-  // Prefer a newly selected scene, otherwise reuse the active Sentinel-2 scene.
-  const savedScene =
-    sessionStorage.getItem("satquery_selected_scene") ||
-    sessionStorage.getItem("satquery_active_scene");
+  useEffect(() => {
+    const savedScene =
+      sessionStorage.getItem("satquery_selected_scene") ||
+      sessionStorage.getItem("satquery_active_scene");
 
-  if (!savedScene) {
-    return;
-  }
+    if (!savedScene) {
+      return;
+    }
 
-  let cancelled = false;
+    let cancelled = false;
 
-  const loadSelectedScene = async () => {
-    try {
-      const parsed = JSON.parse(savedScene);
+    const loadSelectedScene = async () => {
+      try {
+        const parsed = JSON.parse(savedScene);
 
-      if (!parsed.previewImage) {
+        if (!parsed.previewImage) {
+          sessionStorage.removeItem(
+            "satquery_selected_scene"
+          );
+          return;
+        }
+
+        const response = await fetch(parsed.previewImage);
+
+        if (!response.ok) {
+          throw new Error(
+            "Selected Sentinel-2 preview could not be loaded."
+          );
+        }
+
+        const blob = await response.blob();
+
+        const file = new File(
+          [blob],
+          "sentinel-2-scene.jpg",
+          {
+            type: blob.type || "image/jpeg",
+          }
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        const scene = parsed.scene || null;
+        const bounds = parsed.areaBounds || null;
+
+        setActiveScene(scene);
+        setActiveAreaBounds(bounds);
+
+        processImage(file, {
+          keepScene: true,
+        });
+
+        sessionStorage.setItem(
+          "satquery_active_scene",
+          JSON.stringify({
+            scene,
+            areaBounds: bounds,
+          })
+        );
+
         sessionStorage.removeItem(
           "satquery_selected_scene"
         );
-        return;
-      }
-
-      const response = await fetch(
-        parsed.previewImage
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          "Selected Sentinel-2 preview could not be loaded."
+      } catch (error) {
+        console.error(
+          "Failed to load Sentinel-2 scene:",
+          error
         );
-      }
 
-      const blob = await response.blob();
-
-      const file = new File(
-        [blob],
-        "sentinel-2-scene.jpg",
-        {
-          type: blob.type || "image/jpeg",
+        if (!cancelled) {
+          setError(
+            error?.message ||
+              "Unable to load the selected Sentinel-2 scene."
+          );
         }
-      );
-
-      if (cancelled) {
-        return;
       }
+    };
 
-      // Keep the selected Sentinel-2 scene and AOI in React state.
-      // NDVI uses these values when the Analyze Image button is clicked.
-      const scene = parsed.scene || null;
-      const bounds = parsed.areaBounds || null;
+    loadSelectedScene();
 
-      setActiveScene(scene);
-      setActiveAreaBounds(bounds);
-
-      processImage(file, { keepScene: true });
-
-      sessionStorage.setItem(
-        "satquery_active_scene",
-        JSON.stringify({
-          scene,
-          areaBounds: bounds,
-        })
-      );
-
-      sessionStorage.removeItem(
-        "satquery_selected_scene"
-      );
-    } catch (error) {
-      console.error(
-        "Failed to load Sentinel-2 scene:",
-        error
-      );
-
-      if (!cancelled) {
-        setError(
-          error?.message ||
-            "Unable to load the selected Sentinel-2 scene."
-        );
-      }
-    }
-  };
-
-  loadSelectedScene();
-
-  return () => {
-    cancelled = true;
-  };
-}, []);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // =========================================================
   // LOAD DEMO IMAGE
   // =========================================================
-  
 
   const loadDemoImage = async () => {
     try {
       setError("");
       setAnswer(null);
+
       setNdviResult(null);
       setNdviError("");
+
       setNdwiResult(null);
       setNdwiError("");
+
+      setNdbiResult(null);
+      setNdbiError("");
+
       setActiveScene(null);
       setActiveAreaBounds(null);
 
@@ -243,15 +270,21 @@ useEffect(() => {
 
       const blob = await response.blob();
 
-      const file = new File([blob], DEMO_IMAGE.name, {
-        type: DEMO_IMAGE.type,
-      });
+      const file = new File(
+        [blob],
+        DEMO_IMAGE.name,
+        {
+          type: DEMO_IMAGE.type,
+        }
+      );
 
       processImage(file);
     } catch (err) {
-      setError(err?.message || "Unable to load demo image.");
+      setError(
+        err?.message ||
+          "Unable to load demo image."
+      );
     }
-    
   };
 
   // =========================================================
@@ -296,16 +329,22 @@ useEffect(() => {
     setQuestion("");
     setAnswer(null);
     setError("");
+
     setNdviResult(null);
     setNdviError("");
+
     setNdwiResult(null);
     setNdwiError("");
+
+    setNdbiResult(null);
+    setNdbiError("");
+
     setActiveScene(null);
     setActiveAreaBounds(null);
   };
 
   // =========================================================
-  // COMBINED AI + NDVI ANALYSIS
+  // COMBINED AI + NDVI + NDWI + NDBI ANALYSIS
   // =========================================================
 
   const analyzeImage = async () => {
@@ -319,18 +358,27 @@ useEffect(() => {
 
     setIsAnalyzing(true);
     setAnswer(null);
+
     setNdviResult(null);
     setNdviError("");
+
     setNdwiResult(null);
     setNdwiError("");
+
+    setNdbiResult(null);
+    setNdbiError("");
+
     setError("");
 
     try {
       let ndviEvidence = "";
       let ndwiEvidence = "";
+      let ndbiEvidence = "";
 
-      // NDVI is available only when the image came from the
-      // Sentinel-2 GeoLocation workflow with an AOI.
+      // =====================================================
+      // NDVI
+      // =====================================================
+
       if (activeScene && activeAreaBounds) {
         try {
           const ndvi = await analyzeNDVI({
@@ -340,27 +388,35 @@ useEffect(() => {
 
           setNdviResult(ndvi);
 
-          const stats = ndvi?.stats || ndvi?.statistics || {};
+          const stats =
+            ndvi?.stats ||
+            ndvi?.statistics ||
+            {};
+
           const mean =
             stats.mean ??
             ndvi?.mean_ndvi ??
             ndvi?.mean ??
             null;
+
           const min =
             stats.min ??
             ndvi?.min_ndvi ??
             ndvi?.min ??
             null;
+
           const max =
             stats.max ??
             ndvi?.max_ndvi ??
             ndvi?.max ??
             null;
+
           const vegetation =
             stats.vegetation_percentage ??
             ndvi?.vegetation_percentage ??
             ndvi?.vegetation_percent ??
             null;
+
           const health =
             stats.vegetation_health ??
             ndvi?.vegetation_health ??
@@ -370,17 +426,35 @@ useEffect(() => {
           ndviEvidence = `
 
 NDVI ANALYSIS EVIDENCE FROM THE SAME SENTINEL-2 AOI:
-Mean NDVI: ${mean !== null ? Number(mean).toFixed(4) : "Unavailable"}
-Minimum NDVI: ${min !== null ? Number(min).toFixed(4) : "Unavailable"}
-Maximum NDVI: ${max !== null ? Number(max).toFixed(4) : "Unavailable"}
+Mean NDVI: ${
+            mean !== null
+              ? Number(mean).toFixed(4)
+              : "Unavailable"
+          }
+Minimum NDVI: ${
+            min !== null
+              ? Number(min).toFixed(4)
+              : "Unavailable"
+          }
+Maximum NDVI: ${
+            max !== null
+              ? Number(max).toFixed(4)
+              : "Unavailable"
+          }
 Vegetation area (NDVI > 0.20): ${
-            vegetation !== null ? `${Number(vegetation).toFixed(2)}%` : "Unavailable"
+            vegetation !== null
+              ? `${Number(vegetation).toFixed(2)}%`
+              : "Unavailable"
           }
 Vegetation health: ${health}
 
 Use these numerical NDVI values together with the visible satellite image. Do not invent different NDVI values.`;
         } catch (ndviErr) {
-          console.error("NDVI analysis failed:", ndviErr);
+          console.error(
+            "NDVI analysis failed:",
+            ndviErr
+          );
+
           setNdviError(
             ndviErr?.message ||
               "NDVI analysis failed. AI image analysis will continue."
@@ -388,7 +462,10 @@ Use these numerical NDVI values together with the visible satellite image. Do no
         }
       }
 
-      // NDWI is available only for Sentinel-2 scenes with a valid AOI.
+      // =====================================================
+      // NDWI
+      // =====================================================
+
       if (activeScene && activeAreaBounds) {
         try {
           const ndwi = await analyzeNDWI({
@@ -398,27 +475,35 @@ Use these numerical NDVI values together with the visible satellite image. Do no
 
           setNdwiResult(ndwi);
 
-          const stats = ndwi?.stats || ndwi?.statistics || {};
+          const stats =
+            ndwi?.stats ||
+            ndwi?.statistics ||
+            {};
+
           const mean =
             stats.mean ??
             ndwi?.mean_ndwi ??
             ndwi?.mean ??
             null;
+
           const min =
             stats.min ??
             ndwi?.min_ndwi ??
             ndwi?.min ??
             null;
+
           const max =
             stats.max ??
             ndwi?.max_ndwi ??
             ndwi?.max ??
             null;
+
           const water =
             stats.water_percentage ??
             ndwi?.water_percentage ??
             ndwi?.water_percent ??
             null;
+
           const status =
             stats.water_status ??
             ndwi?.water_status ??
@@ -428,17 +513,35 @@ Use these numerical NDVI values together with the visible satellite image. Do no
           ndwiEvidence = `
 
 NDWI ANALYSIS EVIDENCE FROM THE SAME SENTINEL-2 AOI:
-Mean NDWI: ${mean !== null ? Number(mean).toFixed(4) : "Unavailable"}
-Minimum NDWI: ${min !== null ? Number(min).toFixed(4) : "Unavailable"}
-Maximum NDWI: ${max !== null ? Number(max).toFixed(4) : "Unavailable"}
+Mean NDWI: ${
+            mean !== null
+              ? Number(mean).toFixed(4)
+              : "Unavailable"
+          }
+Minimum NDWI: ${
+            min !== null
+              ? Number(min).toFixed(4)
+              : "Unavailable"
+          }
+Maximum NDWI: ${
+            max !== null
+              ? Number(max).toFixed(4)
+              : "Unavailable"
+          }
 Water area (NDWI > 0.20): ${
-            water !== null ? `${Number(water).toFixed(2)}%` : "Unavailable"
+            water !== null
+              ? `${Number(water).toFixed(2)}%`
+              : "Unavailable"
           }
 Water status: ${status}
 
 Use these numerical NDWI values together with the visible satellite image. Do not invent different NDWI values.`;
         } catch (ndwiErr) {
-          console.error("NDWI analysis failed:", ndwiErr);
+          console.error(
+            "NDWI analysis failed:",
+            ndwiErr
+          );
+
           setNdwiError(
             ndwiErr?.message ||
               "NDWI analysis failed. AI image analysis will continue."
@@ -446,7 +549,99 @@ Use these numerical NDWI values together with the visible satellite image. Do no
         }
       }
 
-      const combinedQuestion = `${userQuestion}${ndviEvidence}${ndwiEvidence}`;
+      // =====================================================
+      // NDBI
+      // =====================================================
+
+      if (activeScene && activeAreaBounds) {
+        try {
+          const ndbi = await analyzeNDBI({
+            scene: activeScene,
+            areaBounds: activeAreaBounds,
+          });
+
+          setNdbiResult(ndbi);
+
+          const stats =
+            ndbi?.stats ||
+            ndbi?.statistics ||
+            {};
+
+          const mean =
+            stats.mean ??
+            ndbi?.mean_ndbi ??
+            ndbi?.mean ??
+            null;
+
+          const min =
+            stats.min ??
+            ndbi?.min_ndbi ??
+            ndbi?.min ??
+            null;
+
+          const max =
+            stats.max ??
+            ndbi?.max_ndbi ??
+            ndbi?.max ??
+            null;
+
+          const builtup =
+            stats.builtup_percentage ??
+            ndbi?.builtup_percentage ??
+            ndbi?.builtup_percent ??
+            null;
+
+          const status =
+            stats.builtup_status ??
+            ndbi?.builtup_status ??
+            ndbi?.status ??
+            "Unknown";
+
+          ndbiEvidence = `
+
+NDBI ANALYSIS EVIDENCE FROM THE SAME SENTINEL-2 AOI:
+Mean NDBI: ${
+            mean !== null
+              ? Number(mean).toFixed(4)
+              : "Unavailable"
+          }
+Minimum NDBI: ${
+            min !== null
+              ? Number(min).toFixed(4)
+              : "Unavailable"
+          }
+Maximum NDBI: ${
+            max !== null
+              ? Number(max).toFixed(4)
+              : "Unavailable"
+          }
+Built-up area (NDBI > 0.20): ${
+            builtup !== null
+              ? `${Number(builtup).toFixed(2)}%`
+              : "Unavailable"
+          }
+Built-up status: ${status}
+
+Use these numerical NDBI values together with the visible satellite image. Do not invent different NDBI values.`;
+        } catch (ndbiErr) {
+          console.error(
+            "NDBI analysis failed:",
+            ndbiErr
+          );
+
+          setNdbiError(
+            ndbiErr?.message ||
+              "NDBI analysis failed. AI image analysis will continue."
+          );
+        }
+      }
+
+      // =====================================================
+      // SEND ALL EVIDENCE TO AI
+      // =====================================================
+
+      const combinedQuestion =
+        `${userQuestion}${ndviEvidence}${ndwiEvidence}${ndbiEvidence}`;
 
       const result = await askVQA({
         file: selectedFile,
@@ -456,7 +651,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
       setAnswer(result);
     } catch (err) {
       setError(
-        err?.message || "Unable to connect to the AI backend."
+        err?.message ||
+          "Unable to connect to the AI backend."
       );
     } finally {
       setIsAnalyzing(false);
@@ -506,7 +702,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
           <div className="text-3xl">🛰️</div>
 
           <div>
-            <h1 className="text-xl font-semibold">SatQuery AI</h1>
+            <h1 className="text-xl font-semibold">
+              SatQuery AI
+            </h1>
 
             <p className="text-[10px] uppercase tracking-[0.25em] text-blue-400">
               Satellite Intelligence
@@ -536,13 +734,15 @@ Use these numerical NDWI values together with the visible satellite image. Do no
 
           <h2 className="text-4xl font-bold md:text-5xl">
             Understand Your{" "}
-            <span className="text-blue-400">Satellite Image</span>
+            <span className="text-blue-400">
+              Satellite Image
+            </span>
           </h2>
 
           <p className="mt-4 max-w-2xl text-gray-400">
-            Upload satellite imagery and ask AI questions about buildings,
-            roads, vegetation, water bodies, land use and other visible
-            features.
+            Upload satellite imagery and ask AI questions about
+            buildings, roads, vegetation, water bodies, land use
+            and other visible features.
           </p>
         </div>
 
@@ -567,7 +767,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                 </p>
 
                 <p className="mt-1 max-w-[420px] truncate text-sm text-gray-300">
-                  {fileName || "No satellite image loaded"}
+                  {fileName ||
+                    "No satellite image loaded"}
                 </p>
               </div>
 
@@ -578,7 +779,10 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                     : "border-yellow-400/20 bg-yellow-400/10 text-yellow-400"
                 }`}
               >
-                ● {previewUrl ? "IMAGE LOADED" : "WAITING"}
+                ●{" "}
+                {previewUrl
+                  ? "IMAGE LOADED"
+                  : "WAITING"}
               </span>
             </div>
 
@@ -596,7 +800,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       e.preventDefault();
                       setIsDragging(true);
                     }}
-                    onDragLeave={() => setIsDragging(false)}
+                    onDragLeave={() =>
+                      setIsDragging(false)
+                    }
                     onDrop={handleDrop}
                     className={`flex min-h-[340px] cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed px-8 text-center transition duration-300 ${
                       isDragging
@@ -604,7 +810,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                         : "border-blue-400/30 bg-blue-500/[0.03] hover:border-blue-400/60 hover:bg-blue-500/[0.08]"
                     }`}
                   >
-                    <div className="mb-6 text-7xl">🛰️</div>
+                    <div className="mb-6 text-7xl">
+                      🛰️
+                    </div>
 
                     <h3 className="text-2xl font-semibold">
                       {isDragging
@@ -613,21 +821,26 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                     </h3>
 
                     <p className="mt-3 max-w-md text-sm leading-6 text-gray-500">
-                      Drag and drop a satellite raster here, or click to
-                      browse.
+                      Drag and drop a satellite raster here,
+                      or click to browse.
                     </p>
 
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
-                      {["PNG", "JPG", "GeoTIFF", "JP2", "J2K", "NITF"].map(
-                        (format) => (
-                          <span
-                            key={format}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-500"
-                          >
-                            {format}
-                          </span>
-                        )
-                      )}
+                      {[
+                        "PNG",
+                        "JPG",
+                        "GeoTIFF",
+                        "JP2",
+                        "J2K",
+                        "NITF",
+                      ].map((format) => (
+                        <span
+                          key={format}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-500"
+                        >
+                          {format}
+                        </span>
+                      ))}
                     </div>
 
                     {/* DEMO BUTTON */}
@@ -646,7 +859,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                     </div>
 
                     <p className="mt-4 text-xs text-blue-400/70">
-                      PNG/JPG images are previewed directly in the browser.
+                      PNG/JPG images are previewed directly in
+                      the browser.
                     </p>
 
                     <p className="mt-2 text-xs text-gray-600">
@@ -662,15 +876,22 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                 </div>
               ) : (
                 <div className="relative flex h-full w-full items-center justify-center pb-24 pt-12">
-                  {isBrowserPreviewable(selectedFile) ? (
+                  {isBrowserPreviewable(
+                    selectedFile
+                  ) ? (
                     <img
                       src={previewUrl}
-                      alt={fileName || "Uploaded satellite image"}
+                      alt={
+                        fileName ||
+                        "Uploaded satellite image"
+                      }
                       className="max-h-[470px] max-w-full rounded-2xl border border-blue-400/20 object-contain shadow-2xl shadow-blue-900/20"
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center rounded-3xl border border-blue-400/20 bg-blue-500/[0.05] px-10 py-16 text-center">
-                      <div className="text-6xl">🛰️</div>
+                      <div className="text-6xl">
+                        🛰️
+                      </div>
 
                       <p className="mt-5 text-lg font-semibold">
                         Satellite Image Loaded
@@ -685,8 +906,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       </p>
 
                       <p className="mt-4 max-w-md text-xs leading-5 text-gray-600">
-                        This raster format is accepted by the AI pipeline but
-                        is not natively previewed by most browsers.
+                        This raster format is accepted by the AI
+                        pipeline but is not natively previewed
+                        by most browsers.
                       </p>
                     </div>
                   )}
@@ -737,7 +959,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
               </div>
 
               <div>
-                <h3 className="font-semibold">Ask AI</h3>
+                <h3 className="font-semibold">
+                  Ask AI
+                </h3>
 
                 <p className="text-xs text-gray-500">
                   Satellite image intelligence
@@ -748,7 +972,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
             {/* STATUS */}
             <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">AI STATUS</span>
+                <span className="text-xs text-gray-500">
+                  AI STATUS
+                </span>
 
                 <span className="flex items-center gap-2 text-xs text-green-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
@@ -759,7 +985,7 @@ Use these numerical NDWI values together with the visible satellite image. Do no
               <p className="mt-3 text-sm leading-6 text-gray-400">
                 {previewUrl
                   ? activeScene
-                    ? "Sentinel-2 image ready. Analyze to run AI image understanding + NDVI + NDWI for the selected AOI."
+                    ? "Sentinel-2 image ready. Analyze to run AI image understanding + NDVI + NDWI + NDBI for the selected AOI."
                     : "Your satellite image is ready. Analyze it with AI or ask a question."
                   : "Upload a satellite image first to enable AI analysis."}
               </p>
@@ -768,12 +994,17 @@ Use these numerical NDWI values together with the visible satellite image. Do no
             {/* QUESTION */}
             <div className="mt-6">
               <label className="mb-2 block text-xs uppercase tracking-wider text-gray-500">
-                Your Question <span className="text-gray-700">(optional)</span>
+                Your Question{" "}
+                <span className="text-gray-700">
+                  (optional)
+                </span>
               </label>
 
               <textarea
                 value={question}
-                onChange={(e) => setQuestion(e.target.value)}
+                onChange={(e) =>
+                  setQuestion(e.target.value)
+                }
                 disabled={!previewUrl}
                 rows={5}
                 placeholder={
@@ -785,30 +1016,38 @@ Use these numerical NDWI values together with the visible satellite image. Do no
               />
             </div>
 
-            {/* COMBINED ANALYSIS */}
+            {/* COMBINED ANALYSIS BUTTON */}
             <button
-              disabled={!previewUrl || isAnalyzing}
+              disabled={
+                !previewUrl ||
+                isAnalyzing
+              }
               onClick={analyzeImage}
               className={`mt-4 w-full rounded-xl py-3.5 font-semibold transition ${
-                previewUrl && !isAnalyzing
+                previewUrl &&
+                !isAnalyzing
                   ? "bg-blue-500 shadow-lg shadow-blue-500/20 hover:bg-blue-400"
                   : "cursor-not-allowed bg-gray-700 text-gray-500"
               }`}
             >
               {isAnalyzing
                 ? activeScene
-                  ? "Analyzing AI + NDVI + NDWI..."
+                  ? "Analyzing AI + NDVI + NDWI + NDBI..."
                   : "Analyzing satellite image..."
                 : "Analyze Image ✦"}
             </button>
 
-            {/* NDVI RESULT */}
+            {/* =================================================
+                NDVI RESULT
+                ================================================= */}
+
             {ndviResult && (
               <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs uppercase tracking-[0.2em] text-emerald-400">
                     NDVI Analysis
                   </p>
+
                   <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-300">
                     SENTINEL-2
                   </span>
@@ -831,7 +1070,7 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                 )}
 
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  <NDVICard
+                  <MetricCard
                     label="Mean"
                     value={
                       ndviResult?.stats?.mean ??
@@ -839,7 +1078,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndviResult?.mean
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Minimum"
                     value={
                       ndviResult?.stats?.min ??
@@ -847,7 +1087,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndviResult?.min
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Maximum"
                     value={
                       ndviResult?.stats?.max ??
@@ -855,10 +1096,12 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndviResult?.max
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Vegetation"
                     value={
-                      ndviResult?.stats?.vegetation_percentage ??
+                      ndviResult?.stats
+                        ?.vegetation_percentage ??
                       ndviResult?.vegetation_percentage ??
                       ndviResult?.vegetation_percent
                     }
@@ -866,17 +1109,16 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                   />
                 </div>
 
-                <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
-                    Vegetation Health
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-gray-200">
-                    {ndviResult?.stats?.vegetation_health ||
-                      ndviResult?.vegetation_health ||
-                      ndviResult?.health ||
-                      "Unavailable"}
-                  </p>
-                </div>
+                <StatusCard
+                  label="Vegetation Health"
+                  value={
+                    ndviResult?.stats
+                      ?.vegetation_health ||
+                    ndviResult?.vegetation_health ||
+                    ndviResult?.health ||
+                    "Unavailable"
+                  }
+                />
               </div>
             )}
 
@@ -886,13 +1128,17 @@ Use these numerical NDWI values together with the visible satellite image. Do no
               </div>
             )}
 
-            {/* NDWI RESULT */}
+            {/* =================================================
+                NDWI RESULT
+                ================================================= */}
+
             {ndwiResult && (
               <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs uppercase tracking-[0.2em] text-cyan-400">
                     NDWI Analysis
                   </p>
+
                   <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-300">
                     SENTINEL-2
                   </span>
@@ -915,7 +1161,7 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                 )}
 
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  <NDVICard
+                  <MetricCard
                     label="Mean"
                     value={
                       ndwiResult?.stats?.mean ??
@@ -923,7 +1169,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndwiResult?.mean
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Minimum"
                     value={
                       ndwiResult?.stats?.min ??
@@ -931,7 +1178,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndwiResult?.min
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Maximum"
                     value={
                       ndwiResult?.stats?.max ??
@@ -939,10 +1187,12 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                       ndwiResult?.max
                     }
                   />
-                  <NDVICard
+
+                  <MetricCard
                     label="Water"
                     value={
-                      ndwiResult?.stats?.water_percentage ??
+                      ndwiResult?.stats
+                        ?.water_percentage ??
                       ndwiResult?.water_percentage ??
                       ndwiResult?.water_percent
                     }
@@ -950,17 +1200,16 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                   />
                 </div>
 
-                <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
-                    Water Status
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-gray-200">
-                    {ndwiResult?.stats?.water_status ||
-                      ndwiResult?.water_status ||
-                      ndwiResult?.status ||
-                      "Unavailable"}
-                  </p>
-                </div>
+                <StatusCard
+                  label="Water Status"
+                  value={
+                    ndwiResult?.stats
+                      ?.water_status ||
+                    ndwiResult?.water_status ||
+                    ndwiResult?.status ||
+                    "Unavailable"
+                  }
+                />
               </div>
             )}
 
@@ -970,7 +1219,101 @@ Use these numerical NDWI values together with the visible satellite image. Do no
               </div>
             )}
 
-            {/* ANSWER */}
+            {/* =================================================
+                NDBI RESULT
+                ================================================= */}
+
+            {ndbiResult && (
+              <div className="mt-5 rounded-2xl border border-orange-400/20 bg-orange-400/[0.05] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
+                    NDBI Analysis
+                  </p>
+
+                  <span className="rounded-full border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[10px] text-orange-300">
+                    SENTINEL-2
+                  </span>
+                </div>
+
+                {(ndbiResult.ndbi_map ||
+                  ndbiResult.map ||
+                  ndbiResult.image ||
+                  ndbiResult.image_url) && (
+                  <img
+                    src={
+                      ndbiResult.ndbi_map ||
+                      ndbiResult.map ||
+                      ndbiResult.image ||
+                      ndbiResult.image_url
+                    }
+                    alt="NDBI map"
+                    className="mt-4 w-full rounded-xl border border-white/10 object-contain"
+                  />
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <MetricCard
+                    label="Mean"
+                    value={
+                      ndbiResult?.stats?.mean ??
+                      ndbiResult?.mean_ndbi ??
+                      ndbiResult?.mean
+                    }
+                  />
+
+                  <MetricCard
+                    label="Minimum"
+                    value={
+                      ndbiResult?.stats?.min ??
+                      ndbiResult?.min_ndbi ??
+                      ndbiResult?.min
+                    }
+                  />
+
+                  <MetricCard
+                    label="Maximum"
+                    value={
+                      ndbiResult?.stats?.max ??
+                      ndbiResult?.max_ndbi ??
+                      ndbiResult?.max
+                    }
+                  />
+
+                  <MetricCard
+                    label="Built-up"
+                    value={
+                      ndbiResult?.stats
+                        ?.builtup_percentage ??
+                      ndbiResult?.builtup_percentage ??
+                      ndbiResult?.builtup_percent
+                    }
+                    suffix="%"
+                  />
+                </div>
+
+                <StatusCard
+                  label="Built-up Status"
+                  value={
+                    ndbiResult?.stats
+                      ?.builtup_status ||
+                    ndbiResult?.builtup_status ||
+                    ndbiResult?.status ||
+                    "Unavailable"
+                  }
+                />
+              </div>
+            )}
+
+            {ndbiError && (
+              <div className="mt-4 rounded-xl border border-yellow-400/20 bg-yellow-400/[0.06] p-3 text-xs leading-5 text-yellow-300">
+                NDBI: {ndbiError}
+              </div>
+            )}
+
+            {/* =================================================
+                AI ANSWER
+                ================================================= */}
+
             {answer && (
               <div className="mt-5 rounded-2xl border border-green-400/20 bg-green-400/[0.06] p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -979,7 +1322,8 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                   </p>
 
                   <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-400">
-                    {answer.provider === "huggingface"
+                    {answer.provider ===
+                    "huggingface"
                       ? "LIVE MODEL"
                       : "DEMO FALLBACK"}
                   </span>
@@ -1009,7 +1353,9 @@ Use these numerical NDWI values together with the visible satellite image. Do no
                   <button
                     key={item}
                     disabled={!previewUrl}
-                    onClick={() => setQuestion(item)}
+                    onClick={() =>
+                      setQuestion(item)
+                    }
                     className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-gray-400 transition hover:border-blue-400/30 hover:text-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {item}
@@ -1028,7 +1374,11 @@ Use these numerical NDWI values together with the visible satellite image. Do no
             value={fileName || "Not uploaded"}
           />
 
-          <InfoCard icon="💾" title="File Size" value={fileSize || "—"} />
+          <InfoCard
+            icon="💾"
+            title="File Size"
+            value={fileSize || "—"}
+          />
 
           <InfoCard
             icon="🔍"
@@ -1041,9 +1391,19 @@ Use these numerical NDWI values together with the visible satellite image. Do no
   );
 }
 
-function NDVICard({ label, value, suffix = "" }) {
+// =========================================================
+// METRIC CARD
+// =========================================================
+
+function MetricCard({
+  label,
+  value,
+  suffix = "",
+}) {
   const numericValue =
-    value !== null && value !== undefined && value !== ""
+    value !== null &&
+    value !== undefined &&
+    value !== ""
       ? Number(value)
       : null;
 
@@ -1052,8 +1412,10 @@ function NDVICard({ label, value, suffix = "" }) {
       <p className="text-[10px] uppercase tracking-wider text-gray-500">
         {label}
       </p>
+
       <p className="mt-1 text-sm font-semibold text-gray-200">
-        {numericValue !== null && Number.isFinite(numericValue)
+        {numericValue !== null &&
+        Number.isFinite(numericValue)
           ? `${numericValue.toFixed(2)}${suffix}`
           : "—"}
       </p>
@@ -1061,18 +1423,51 @@ function NDVICard({ label, value, suffix = "" }) {
   );
 }
 
-function InfoCard({ icon, title, value }) {
+// =========================================================
+// STATUS CARD
+// =========================================================
+
+function StatusCard({
+  label,
+  value,
+}) {
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
+
+      <p className="mt-1 text-sm font-medium text-gray-200">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+// =========================================================
+// INFO CARD
+// =========================================================
+
+function InfoCard({
+  icon,
+  title,
+  value,
+}) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-xl">
       <div className="flex items-center gap-3">
-        <span className="text-xl">{icon}</span>
+        <span className="text-xl">
+          {icon}
+        </span>
 
         <p className="text-xs uppercase tracking-wider text-gray-500">
           {title}
         </p>
       </div>
 
-      <p className="mt-3 truncate text-lg font-medium">{value}</p>
+      <p className="mt-3 truncate text-lg font-medium">
+        {value}
+      </p>
     </div>
   );
 }
