@@ -2380,6 +2380,602 @@ function evaluatePixel(sample) {
                 str(exc),
         }
 # ============================================================
+# SENTINEL-2 NDWI ANALYSIS
+# ============================================================
+
+@app.post("/api/satellite-ndwi")
+async def satellite_ndwi(
+    west: float = Form(...),
+    south: float = Form(...),
+    east: float = Form(...),
+    north: float = Form(...),
+    acquisition_date: str = Form(...),
+):
+    """
+    Calculate NDWI from Sentinel-2 L2A.
+
+    B03 = Green
+    B08 = Near Infrared (NIR)
+
+    NDWI = (Green - NIR) / (Green + NIR)
+    """
+
+    global CDSE_ACCESS_TOKEN
+    global CDSE_TOKEN_EXPIRES_AT
+
+    # --------------------------------------------------------
+    # VALIDATE COORDINATES
+    # --------------------------------------------------------
+
+    try:
+        west = float(west)
+        south = float(south)
+        east = float(east)
+        north = float(north)
+
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "error": "Invalid AOI coordinates.",
+        }
+
+    if not (
+        -180 <= west <= 180
+        and -180 <= east <= 180
+        and -90 <= south <= 90
+        and -90 <= north <= 90
+    ):
+        return {
+            "success": False,
+            "error": (
+                "Coordinates are outside valid WGS84 limits."
+            ),
+        }
+
+    if west >= east:
+        return {
+            "success": False,
+            "error": "West must be less than East.",
+        }
+
+    if south >= north:
+        return {
+            "success": False,
+            "error": "South must be less than North.",
+        }
+
+    # --------------------------------------------------------
+    # VALIDATE DATE
+    # --------------------------------------------------------
+
+    acquisition_date = (
+        acquisition_date or ""
+    ).strip()
+
+    if not acquisition_date:
+        return {
+            "success": False,
+            "error": "Acquisition date is required.",
+        }
+
+    date_only = acquisition_date[:10]
+
+    from datetime import datetime
+
+    try:
+        datetime.strptime(
+            date_only,
+            "%Y-%m-%d",
+        )
+
+    except ValueError:
+        return {
+            "success": False,
+            "error": (
+                "Invalid acquisition date. "
+                "Expected YYYY-MM-DD."
+            ),
+        }
+
+    # --------------------------------------------------------
+    # AUTHENTICATION
+    # --------------------------------------------------------
+
+    try:
+        access_token = get_cdse_access_token()
+
+    except Exception as exc:
+        print(
+            "CDSE NDWI AUTH ERROR:",
+            str(exc),
+        )
+
+        return {
+            "success": False,
+            "error": (
+                "Unable to authenticate with "
+                "Copernicus Data Space."
+            ),
+            "details": str(exc),
+        }
+
+    # --------------------------------------------------------
+    # NDWI EVALSCRIPT
+    #
+    # B03 = Green
+    # B08 = NIR
+    #
+    # SCL masks:
+    # 3  = cloud shadow
+    # 8  = cloud medium probability
+    # 9  = cloud high probability
+    # 10 = cirrus
+    # 11 = snow / ice
+    # --------------------------------------------------------
+
+    evalscript = """
+//VERSION=3
+
+function setup() {
+  return {
+    input: [
+      "B03",
+      "B08",
+      "SCL"
+    ],
+    output: {
+      bands: 1,
+      sampleType: "FLOAT32"
+    }
+  };
+}
+
+function evaluatePixel(sample) {
+
+  if (
+    sample.SCL === 3 ||
+    sample.SCL === 8 ||
+    sample.SCL === 9 ||
+    sample.SCL === 10 ||
+    sample.SCL === 11
+  ) {
+    return [-9999];
+  }
+
+  var green = sample.B03;
+  var nir = sample.B08;
+
+  var denominator = green + nir;
+
+  if (denominator === 0) {
+    return [-9999];
+  }
+
+  var ndwi = (green - nir) / denominator;
+
+  return [ndwi];
+}
+"""
+
+    # --------------------------------------------------------
+    # COPERNICUS PROCESS REQUEST
+    # --------------------------------------------------------
+
+    request_body = {
+        "input": {
+            "bounds": {
+                "bbox": [
+                    west,
+                    south,
+                    east,
+                    north,
+                ],
+                "properties": {
+                    "crs":
+                        "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                },
+            },
+
+            "data": [
+                {
+                    "type":
+                        "sentinel-2-l2a",
+
+                    "dataFilter": {
+                        "timeRange": {
+                            "from":
+                                f"{date_only}T00:00:00Z",
+
+                            "to":
+                                f"{date_only}T23:59:59Z",
+                        },
+
+                        "mosaickingOrder":
+                            "leastCC",
+                    },
+                }
+            ],
+        },
+
+        "output": {
+            "width": 768,
+            "height": 768,
+
+            "responses": [
+                {
+                    "identifier": "default",
+
+                    "format": {
+                        "type":
+                            "image/tiff"
+                    },
+                }
+            ],
+        },
+
+        "evalscript":
+            evalscript,
+    }
+
+    headers = {
+        "Authorization":
+            f"Bearer {access_token}",
+
+        "Content-Type":
+            "application/json",
+
+        "Accept":
+            "image/tiff",
+    }
+
+    # --------------------------------------------------------
+    # CALL COPERNICUS PROCESS API
+    # --------------------------------------------------------
+
+    try:
+
+        response = requests.post(
+            CDSE_PROCESS_URL,
+            headers=headers,
+            json=request_body,
+            timeout=180,
+        )
+
+        print(
+            "CDSE NDWI STATUS:",
+            response.status_code,
+        )
+
+        # ----------------------------------------------------
+        # TOKEN EXPIRED -> REFRESH
+        # ----------------------------------------------------
+
+        if response.status_code == 401:
+
+            CDSE_ACCESS_TOKEN = None
+            CDSE_TOKEN_EXPIRES_AT = 0
+
+            access_token = (
+                get_cdse_access_token()
+            )
+
+            headers["Authorization"] = (
+                f"Bearer {access_token}"
+            )
+
+            response = requests.post(
+                CDSE_PROCESS_URL,
+                headers=headers,
+                json=request_body,
+                timeout=180,
+            )
+
+            print(
+                "CDSE NDWI RETRY STATUS:",
+                response.status_code,
+            )
+
+        # ----------------------------------------------------
+        # ERROR
+        # ----------------------------------------------------
+
+        if response.status_code != 200:
+
+            try:
+                details = response.json()
+
+            except Exception:
+                details = response.text[:3000]
+
+            return {
+                "success": False,
+
+                "error": (
+                    "Sentinel-2 NDWI request failed: "
+                    f"{response.status_code}"
+                ),
+
+                "details": details,
+            }
+
+        # ----------------------------------------------------
+        # READ TIFF
+        # ----------------------------------------------------
+
+        if not response.content:
+            return {
+                "success": False,
+                "error":
+                    "Copernicus returned empty NDWI data.",
+            }
+
+        try:
+
+            ndwi_image = Image.open(
+                io.BytesIO(
+                    response.content
+                )
+            )
+
+            ndwi_array = np.array(
+                ndwi_image,
+                dtype=np.float32
+            )
+
+        except Exception as exc:
+
+            return {
+                "success": False,
+
+                "error":
+                    "Unable to decode NDWI raster.",
+
+                "details":
+                    str(exc),
+            }
+
+        # ----------------------------------------------------
+        # CLEAN NDWI DATA
+        # ----------------------------------------------------
+
+        valid_mask = (
+            np.isfinite(ndwi_array)
+            &
+            (ndwi_array > -1.0)
+            &
+            (ndwi_array <= 1.0)
+        )
+
+        valid_values = (
+            ndwi_array[valid_mask]
+        )
+
+        if valid_values.size == 0:
+
+            return {
+                "success": False,
+                "error":
+                    "No valid NDWI pixels were returned.",
+            }
+
+        # ----------------------------------------------------
+        # STATISTICS
+        # ----------------------------------------------------
+
+        mean_ndwi = float(
+            np.mean(valid_values)
+        )
+
+        min_ndwi = float(
+            np.min(valid_values)
+        )
+
+        max_ndwi = float(
+            np.max(valid_values)
+        )
+
+        # ----------------------------------------------------
+        # WATER MASK
+        #
+        # NDWI > 0.20 = water
+        # ----------------------------------------------------
+
+        water_pixels = (
+            valid_values > 0.20
+        ).sum()
+
+        total_valid_pixels = (
+            valid_values.size
+        )
+
+        water_percentage = (
+            water_pixels
+            / total_valid_pixels
+        ) * 100
+
+        # ----------------------------------------------------
+        # WATER STATUS
+        # ----------------------------------------------------
+
+        if mean_ndwi >= 0.50:
+            water_status = "Strong Water Presence"
+
+        elif mean_ndwi >= 0.20:
+            water_status = "Moderate Water Presence"
+
+        elif mean_ndwi >= 0.00:
+            water_status = "Low Water Presence"
+
+        else:
+            water_status = "Very Low Water Presence"
+
+        # ----------------------------------------------------
+        # CREATE NDWI VISUALIZATION
+        #
+        # -1 -> non-water / dry surface
+        #  0 -> mixed / neutral
+        # +1 -> strong water signal
+        # ----------------------------------------------------
+
+        clipped = np.clip(
+            ndwi_array,
+            -1.0,
+            1.0
+        )
+
+        normalized = (
+            (clipped + 1.0)
+            / 2.0
+            * 255.0
+        ).astype(np.uint8)
+
+        colored = cv2.applyColorMap(
+            normalized,
+            cv2.COLORMAP_TURBO
+        )
+
+        colored = cv2.cvtColor(
+            colored,
+            cv2.COLOR_BGR2RGB
+        )
+
+        # Mask invalid pixels
+        invalid_mask = ~valid_mask
+
+        colored[
+            invalid_mask
+        ] = [0, 0, 0]
+
+        ndwi_map = Image.fromarray(
+            colored,
+            mode="RGB"
+        )
+
+        # ----------------------------------------------------
+        # ENCODE NDWI MAP
+        # ----------------------------------------------------
+
+        output = io.BytesIO()
+
+        ndwi_map.save(
+            output,
+            format="PNG",
+            optimize=True
+        )
+
+        encoded = base64.b64encode(
+            output.getvalue()
+        ).decode("utf-8")
+
+        image_data_url = (
+            "data:image/png;base64,"
+            + encoded
+        )
+
+        # ----------------------------------------------------
+        # RESULT
+        # ----------------------------------------------------
+
+        return {
+
+            "success": True,
+
+            "date":
+                date_only,
+
+            "product":
+                "Sentinel-2 L2A",
+
+            "bands": [
+                "B03",
+                "B08",
+            ],
+
+            "formula":
+                "(B03 - B08) / (B03 + B08)",
+
+            "mean_ndwi":
+                round(
+                    mean_ndwi,
+                    4
+                ),
+
+            "min_ndwi":
+                round(
+                    min_ndwi,
+                    4
+                ),
+
+            "max_ndwi":
+                round(
+                    max_ndwi,
+                    4
+                ),
+
+            "water_percentage":
+                round(
+                    water_percentage,
+                    2
+                ),
+
+            "water_status":
+                water_status,
+
+            "valid_pixels":
+                int(
+                    total_valid_pixels
+                ),
+
+            "width":
+                int(
+                    ndwi_array.shape[1]
+                ),
+
+            "height":
+                int(
+                    ndwi_array.shape[0]
+                ),
+
+            "ndwi_map":
+                image_data_url,
+        }
+
+    except requests.RequestException as exc:
+
+        print(
+            "CDSE NDWI REQUEST ERROR:",
+            str(exc),
+        )
+
+        return {
+            "success": False,
+
+            "error": (
+                "Unable to connect to the "
+                "Sentinel-2 Process API."
+            ),
+
+            "details":
+                str(exc),
+        }
+
+    except Exception as exc:
+
+        print(
+            "CDSE NDWI UNEXPECTED ERROR:",
+            str(exc),
+        )
+
+        return {
+            "success": False,
+
+            "error":
+                "Unexpected NDWI processing error.",
+
+            "details":
+                str(exc),
+        }
+# ============================================================
 # VQA
 # ============================================================
 

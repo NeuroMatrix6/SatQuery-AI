@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { askVQA, analyzeNDVI } from "../services/ai";
+import { askVQA, analyzeNDVI, analyzeNDWI } from "../services/ai";
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 
@@ -55,18 +55,28 @@ export default function ImageAnalysis() {
   const [activeAreaBounds, setActiveAreaBounds] = useState(null);
   const [ndviResult, setNdviResult] = useState(null);
   const [ndviError, setNdviError] = useState("");
+  const [ndwiResult, setNdwiResult] = useState(null);
+  const [ndwiError, setNdwiError] = useState("");
 
   // =========================================================
   // PROCESS IMAGE
   // =========================================================
 
-  const processImage = (file) => {
+  const processImage = (file, options = {}) => {
     if (!file) return;
 
     setError("");
     setAnswer(null);
     setNdviResult(null);
     setNdviError("");
+    setNdwiResult(null);
+    setNdwiError("");
+
+    if (!options.keepScene) {
+      setActiveScene(null);
+      setActiveAreaBounds(null);
+      sessionStorage.removeItem("satquery_active_scene");
+    }
 
     const ext = getExtension(file.name);
 
@@ -120,9 +130,10 @@ export default function ImageAnalysis() {
 // =========================================================
 
 useEffect(() => {
-  const savedScene = sessionStorage.getItem(
-    "satquery_selected_scene"
-  );
+  // Prefer a newly selected scene, otherwise reuse the active Sentinel-2 scene.
+  const savedScene =
+    sessionStorage.getItem("satquery_selected_scene") ||
+    sessionStorage.getItem("satquery_active_scene");
 
   if (!savedScene) {
     return;
@@ -173,7 +184,7 @@ useEffect(() => {
       setActiveScene(scene);
       setActiveAreaBounds(bounds);
 
-      processImage(file);
+      processImage(file, { keepScene: true });
 
       sessionStorage.setItem(
         "satquery_active_scene",
@@ -219,6 +230,8 @@ useEffect(() => {
       setAnswer(null);
       setNdviResult(null);
       setNdviError("");
+      setNdwiResult(null);
+      setNdwiError("");
       setActiveScene(null);
       setActiveAreaBounds(null);
 
@@ -285,6 +298,8 @@ useEffect(() => {
     setError("");
     setNdviResult(null);
     setNdviError("");
+    setNdwiResult(null);
+    setNdwiError("");
     setActiveScene(null);
     setActiveAreaBounds(null);
   };
@@ -306,10 +321,13 @@ useEffect(() => {
     setAnswer(null);
     setNdviResult(null);
     setNdviError("");
+    setNdwiResult(null);
+    setNdwiError("");
     setError("");
 
     try {
       let ndviEvidence = "";
+      let ndwiEvidence = "";
 
       // NDVI is available only when the image came from the
       // Sentinel-2 GeoLocation workflow with an AOI.
@@ -370,7 +388,65 @@ Use these numerical NDVI values together with the visible satellite image. Do no
         }
       }
 
-      const combinedQuestion = `${userQuestion}${ndviEvidence}`;
+      // NDWI is available only for Sentinel-2 scenes with a valid AOI.
+      if (activeScene && activeAreaBounds) {
+        try {
+          const ndwi = await analyzeNDWI({
+            scene: activeScene,
+            areaBounds: activeAreaBounds,
+          });
+
+          setNdwiResult(ndwi);
+
+          const stats = ndwi?.stats || ndwi?.statistics || {};
+          const mean =
+            stats.mean ??
+            ndwi?.mean_ndwi ??
+            ndwi?.mean ??
+            null;
+          const min =
+            stats.min ??
+            ndwi?.min_ndwi ??
+            ndwi?.min ??
+            null;
+          const max =
+            stats.max ??
+            ndwi?.max_ndwi ??
+            ndwi?.max ??
+            null;
+          const water =
+            stats.water_percentage ??
+            ndwi?.water_percentage ??
+            ndwi?.water_percent ??
+            null;
+          const status =
+            stats.water_status ??
+            ndwi?.water_status ??
+            ndwi?.status ??
+            "Unknown";
+
+          ndwiEvidence = `
+
+NDWI ANALYSIS EVIDENCE FROM THE SAME SENTINEL-2 AOI:
+Mean NDWI: ${mean !== null ? Number(mean).toFixed(4) : "Unavailable"}
+Minimum NDWI: ${min !== null ? Number(min).toFixed(4) : "Unavailable"}
+Maximum NDWI: ${max !== null ? Number(max).toFixed(4) : "Unavailable"}
+Water area (NDWI > 0.20): ${
+            water !== null ? `${Number(water).toFixed(2)}%` : "Unavailable"
+          }
+Water status: ${status}
+
+Use these numerical NDWI values together with the visible satellite image. Do not invent different NDWI values.`;
+        } catch (ndwiErr) {
+          console.error("NDWI analysis failed:", ndwiErr);
+          setNdwiError(
+            ndwiErr?.message ||
+              "NDWI analysis failed. AI image analysis will continue."
+          );
+        }
+      }
+
+      const combinedQuestion = `${userQuestion}${ndviEvidence}${ndwiEvidence}`;
 
       const result = await askVQA({
         file: selectedFile,
@@ -683,7 +759,7 @@ Use these numerical NDVI values together with the visible satellite image. Do no
               <p className="mt-3 text-sm leading-6 text-gray-400">
                 {previewUrl
                   ? activeScene
-                    ? "Sentinel-2 image ready. Analyze to run AI image understanding + NDVI for the selected AOI."
+                    ? "Sentinel-2 image ready. Analyze to run AI image understanding + NDVI + NDWI for the selected AOI."
                     : "Your satellite image is ready. Analyze it with AI or ask a question."
                   : "Upload a satellite image first to enable AI analysis."}
               </p>
@@ -721,7 +797,7 @@ Use these numerical NDVI values together with the visible satellite image. Do no
             >
               {isAnalyzing
                 ? activeScene
-                  ? "Analyzing AI + NDVI..."
+                  ? "Analyzing AI + NDVI + NDWI..."
                   : "Analyzing satellite image..."
                 : "Analyze Image ✦"}
             </button>
@@ -807,6 +883,90 @@ Use these numerical NDVI values together with the visible satellite image. Do no
             {ndviError && (
               <div className="mt-4 rounded-xl border border-yellow-400/20 bg-yellow-400/[0.06] p-3 text-xs leading-5 text-yellow-300">
                 NDVI: {ndviError}
+              </div>
+            )}
+
+            {/* NDWI RESULT */}
+            {ndwiResult && (
+              <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-cyan-400">
+                    NDWI Analysis
+                  </p>
+                  <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-300">
+                    SENTINEL-2
+                  </span>
+                </div>
+
+                {(ndwiResult.ndwi_map ||
+                  ndwiResult.map ||
+                  ndwiResult.image ||
+                  ndwiResult.image_url) && (
+                  <img
+                    src={
+                      ndwiResult.ndwi_map ||
+                      ndwiResult.map ||
+                      ndwiResult.image ||
+                      ndwiResult.image_url
+                    }
+                    alt="NDWI map"
+                    className="mt-4 w-full rounded-xl border border-white/10 object-contain"
+                  />
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <NDVICard
+                    label="Mean"
+                    value={
+                      ndwiResult?.stats?.mean ??
+                      ndwiResult?.mean_ndwi ??
+                      ndwiResult?.mean
+                    }
+                  />
+                  <NDVICard
+                    label="Minimum"
+                    value={
+                      ndwiResult?.stats?.min ??
+                      ndwiResult?.min_ndwi ??
+                      ndwiResult?.min
+                    }
+                  />
+                  <NDVICard
+                    label="Maximum"
+                    value={
+                      ndwiResult?.stats?.max ??
+                      ndwiResult?.max_ndwi ??
+                      ndwiResult?.max
+                    }
+                  />
+                  <NDVICard
+                    label="Water"
+                    value={
+                      ndwiResult?.stats?.water_percentage ??
+                      ndwiResult?.water_percentage ??
+                      ndwiResult?.water_percent
+                    }
+                    suffix="%"
+                  />
+                </div>
+
+                <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                    Water Status
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-gray-200">
+                    {ndwiResult?.stats?.water_status ||
+                      ndwiResult?.water_status ||
+                      ndwiResult?.status ||
+                      "Unavailable"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {ndwiError && (
+              <div className="mt-4 rounded-xl border border-yellow-400/20 bg-yellow-400/[0.06] p-3 text-xs leading-5 text-yellow-300">
+                NDWI: {ndwiError}
               </div>
             )}
 
