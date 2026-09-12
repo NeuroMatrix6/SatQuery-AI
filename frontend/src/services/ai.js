@@ -97,6 +97,7 @@ export async function analyzeNDVI({ scene, areaBounds }) {
   formData.append("west", String(west));
   formData.append("south", String(south));
   formData.append("east", String(east));
+  formData.append("north", String(north));
   formData.append(
     "acquisition_date",
     acquisitionDate
@@ -150,7 +151,9 @@ export async function analyzeNDWI({ scene, areaBounds }) {
     !Array.isArray(areaBounds) ||
     areaBounds.length !== 2
   ) {
-    throw new Error("Valid AOI bounds are required for NDWI.");
+    throw new Error(
+      "Valid AOI bounds are required for NDWI."
+    );
   }
 
   const acquisitionDate =
