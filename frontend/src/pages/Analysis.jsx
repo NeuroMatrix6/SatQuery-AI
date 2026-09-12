@@ -13,6 +13,7 @@ export default function Analysis() {
       color: "blue",
       path: "/analysis/image",
     },
+
     {
       icon: "🔄",
       title: "Change Detection",
@@ -22,33 +23,55 @@ export default function Analysis() {
       color: "purple",
       path: "/analysis/change",
     },
+
+    {
+      icon: "📍",
+      title: "Geo Location",
+      description:
+        "Select a location on an interactive map and prepare coordinates for satellite-data analysis.",
+      tag: "MAP",
+      color: "cyan",
+      path: "/analysis/geo",
+    },
   ];
 
   return (
     <div className="min-h-screen bg-[#030712] text-white">
 
-      {/* BACKGROUND */}
+      {/* =====================================================
+          BACKGROUND
+      ====================================================== */}
+
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
+
         <div className="absolute left-[5%] top-[-150px] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[160px]" />
 
         <div className="absolute right-[-100px] top-[35%] h-[500px] w-[500px] rounded-full bg-purple-600/10 blur-[170px]" />
 
         <div className="absolute bottom-[-200px] left-[35%] h-[400px] w-[400px] rounded-full bg-cyan-500/5 blur-[150px]" />
+
       </div>
 
-      {/* NAVBAR */}
+
+      {/* =====================================================
+          NAVBAR
+      ====================================================== */}
+
       <nav className="relative z-20 flex items-center justify-between border-b border-white/10 bg-black/30 px-8 py-5 backdrop-blur-xl">
 
         {/* LOGO */}
+
         <button
           onClick={() => navigate("/")}
           className="flex items-center gap-3 text-left"
         >
+
           <div className="text-3xl">
             🛰️
           </div>
 
           <div>
+
             <h1 className="text-xl font-semibold">
               SatQuery AI
             </h1>
@@ -56,10 +79,14 @@ export default function Analysis() {
             <p className="text-[10px] uppercase tracking-[0.25em] text-blue-400">
               Satellite Intelligence
             </p>
+
           </div>
+
         </button>
 
+
         {/* NAVIGATION */}
+
         <div className="hidden items-center gap-8 text-sm text-gray-400 md:flex">
 
           <button
@@ -77,39 +104,58 @@ export default function Analysis() {
           </button>
 
         </div>
+
       </nav>
 
-      {/* MAIN */}
+
+      {/* =====================================================
+          MAIN
+      ====================================================== */}
+
       <main className="relative z-10 mx-auto max-w-6xl px-6 py-16">
 
-        {/* HEADER */}
+        {/* ===================================================
+            HEADER
+        ==================================================== */}
+
         <div className="mx-auto max-w-3xl text-center">
 
           <div className="mb-5 flex items-center justify-center gap-2">
+
             <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
 
             <p className="text-xs uppercase tracking-[0.35em] text-blue-400">
               AI Analysis Workspace
             </p>
+
           </div>
 
+
           <h2 className="text-4xl font-bold tracking-tight md:text-6xl">
+
             What do you want to
 
             <span className="block text-blue-400">
               analyze?
             </span>
+
           </h2>
+
 
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-gray-400 md:text-lg">
             Choose an analysis tool to explore satellite imagery,
-            understand what is visible, and detect changes with AI.
+            understand what is visible, detect changes, and
+            select geographic locations for satellite analysis.
           </p>
 
         </div>
 
-        {/* FEATURE GRID */}
-        <div className="mx-auto mt-14 grid max-w-4xl gap-5 md:grid-cols-2">
+
+        {/* ===================================================
+            FEATURE GRID
+        ==================================================== */}
+
+        <div className="mx-auto mt-14 grid max-w-6xl gap-5 md:grid-cols-2 lg:grid-cols-3">
 
           {features.map((feature) => (
             <FeatureCard
@@ -122,6 +168,7 @@ export default function Analysis() {
         </div>
 
       </main>
+
     </div>
   );
 }
@@ -131,7 +178,10 @@ export default function Analysis() {
    FEATURE CARD
 ========================================================= */
 
-function FeatureCard({ feature, onClick }) {
+function FeatureCard({
+  feature,
+  onClick,
+}) {
 
   const colorClasses = {
 
@@ -149,18 +199,32 @@ function FeatureCard({ feature, onClick }) {
       border: "hover:border-purple-400/40",
     },
 
+    cyan: {
+      icon: "bg-cyan-500/10 border-cyan-400/20",
+      glow: "bg-cyan-500/10",
+      text: "text-cyan-400",
+      border: "hover:border-cyan-400/40",
+    },
+
   };
 
-  const colors = colorClasses[feature.color];
+
+  const colors =
+    colorClasses[feature.color] ||
+    colorClasses.blue;
+
 
   return (
     <button
       onClick={onClick}
       className={`
         group relative overflow-hidden
+        w-full
         rounded-3xl border border-white/10
-        bg-white/[0.03] p-7
-        text-left backdrop-blur-xl
+        bg-white/[0.03]
+        p-7
+        text-left
+        backdrop-blur-xl
         transition-all duration-300
         hover:-translate-y-1
         hover:bg-white/[0.06]
@@ -168,7 +232,10 @@ function FeatureCard({ feature, onClick }) {
       `}
     >
 
-      {/* Glow */}
+      {/* =================================================
+          GLOW
+      ================================================== */}
+
       <div
         className={`
           pointer-events-none absolute
@@ -182,27 +249,35 @@ function FeatureCard({ feature, onClick }) {
         `}
       />
 
-      {/* Top Row */}
+
+      {/* =================================================
+          TOP ROW
+      ================================================== */}
+
       <div className="relative flex items-start justify-between">
 
         <div
           className={`
             flex h-14 w-14
             items-center justify-center
-            rounded-2xl border text-2xl
+            rounded-2xl border
+            text-2xl
             ${colors.icon}
           `}
         >
           {feature.icon}
         </div>
 
+
         <span
           className="
             rounded-full border
-            border-white/10 bg-black/30
+            border-white/10
+            bg-black/30
             px-3 py-1.5
             text-[10px]
-            font-medium tracking-wider
+            font-medium
+            tracking-wider
             text-gray-500
           "
         >
@@ -211,20 +286,28 @@ function FeatureCard({ feature, onClick }) {
 
       </div>
 
-      {/* Content */}
+
+      {/* =================================================
+          CONTENT
+      ================================================== */}
+
       <div className="relative mt-7">
 
         <h3 className="text-xl font-semibold">
           {feature.title}
         </h3>
 
-        <p className="mt-3 max-w-md text-sm leading-6 text-gray-500">
+        <p className="mt-3 min-h-[72px] max-w-md text-sm leading-6 text-gray-500">
           {feature.description}
         </p>
 
       </div>
 
-      {/* Bottom */}
+
+      {/* =================================================
+          BOTTOM
+      ================================================== */}
+
       <div
         className={`
           relative mt-7 flex items-center
@@ -232,7 +315,10 @@ function FeatureCard({ feature, onClick }) {
           ${colors.text}
         `}
       >
-        Open Analysis
+
+        {feature.title === "Geo Location"
+          ? "Open Geo Location"
+          : "Open Analysis"}
 
         <span
           className="
@@ -243,6 +329,7 @@ function FeatureCard({ feature, onClick }) {
         >
           →
         </span>
+
       </div>
 
     </button>

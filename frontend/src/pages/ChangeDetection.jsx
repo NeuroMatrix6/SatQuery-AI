@@ -19,25 +19,157 @@ const DEMO_PAIR = {
 
 export default function ChangeDetection() {
   const navigate = useNavigate();
+const [beforeImage, setBeforeImage] = useState(null);
 
-  const [beforeImage, setBeforeImage] = useState(null);
-  const [afterImage, setAfterImage] = useState(null);
+const [afterImage, setAfterImage] = useState(null);
 
-  const [beforeName, setBeforeName] = useState("");
-  const [afterName, setAfterName] = useState("");
+const [beforeName, setBeforeName] = useState("");
 
-  const [beforeDate, setBeforeDate] = useState("");
-  const [afterDate, setAfterDate] = useState("");
+const [afterName, setAfterName] = useState("");
 
-  const [result, setResult] = useState(null);
-  const [isComparing, setIsComparing] = useState(false);
+const [beforeDate, setBeforeDate] = useState("");
 
-  const [isAiInterpreting, setIsAiInterpreting] = useState(false);
-  const [aiInterpretation, setAiInterpretation] = useState(null);
-  const [aiError, setAiError] = useState("");
+const [afterDate, setAfterDate] = useState("");
 
-  const canvasRef = useRef(null);
+const [beforeScene, setBeforeScene] = useState(null);
 
+const [afterScene, setAfterScene] = useState(null);
+
+const [result, setResult] = useState(null);
+
+const [isComparing, setIsComparing] = useState(false);
+
+const [isAiInterpreting, setIsAiInterpreting] = useState(false);
+
+const [aiInterpretation, setAiInterpretation] = useState(null);
+
+const [aiError, setAiError] = useState("");
+
+const canvasRef = useRef(null);
+// =========================================================
+// LOAD GEOLOCATION CHANGE-DETECTION SCENES
+// =========================================================
+
+useEffect(() => {
+  const beforeSaved = sessionStorage.getItem(
+    "satquery_change_before"
+  );
+
+  const afterSaved = sessionStorage.getItem(
+    "satquery_change_after"
+  );
+
+  if (!beforeSaved && !afterSaved) {
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadScene = async (savedData, type) => {
+    if (!savedData) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(savedData);
+
+      if (!parsed.previewImage) {
+        return;
+      }
+
+      const response = await fetch(
+        parsed.previewImage
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Unable to load ${type} Sentinel-2 scene.`
+        );
+      }
+
+      const blob = await response.blob();
+
+      const sceneDate =
+        parsed.scene?.acquisition_date || "";
+
+      const sceneName =
+        parsed.scene?.product_name ||
+        parsed.scene?.id ||
+        `Sentinel-2 ${type} scene`;
+
+      if (cancelled) {
+        return;
+      }
+
+      const imageUrl =
+        URL.createObjectURL(blob);
+
+      if (type === "before") {
+        setBeforeImage(imageUrl);
+        setBeforeName(sceneName);
+        setBeforeDate(
+          sceneDate
+            ? sceneDate.slice(0, 10)
+            : ""
+        );
+        setBeforeScene(parsed);
+      }
+
+      if (type === "after") {
+        setAfterImage(imageUrl);
+        setAfterName(sceneName);
+        setAfterDate(
+          sceneDate
+            ? sceneDate.slice(0, 10)
+            : ""
+        );
+        setAfterScene(parsed);
+      }
+
+    } catch (error) {
+      console.error(
+        `Failed to load ${type} Sentinel-2 scene:`,
+        error
+      );
+
+      if (!cancelled) {
+        setAiError(
+          error?.message ||
+            `Unable to load ${type} Sentinel-2 scene.`
+        );
+      }
+    }
+  };
+
+  const loadScenes = async () => {
+    await Promise.all([
+      loadScene(
+        beforeSaved,
+        "before"
+      ),
+      loadScene(
+        afterSaved,
+        "after"
+      ),
+    ]);
+
+    if (!cancelled) {
+      sessionStorage.removeItem(
+        "satquery_change_before"
+      );
+
+      sessionStorage.removeItem(
+        "satquery_change_after"
+      );
+    }
+  };
+
+  loadScenes();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
   // =========================================================
   // IMAGE UPLOAD
   // =========================================================

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { askVQA } from "../services/ai";
+import { askVQA, analyzeNDVI } from "../services/ai";
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 
@@ -44,11 +44,17 @@ export default function ImageAnalysis() {
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState("");
   const [dimensions, setDimensions] = useState("");
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(
+    "Give an overall analysis of this satellite image. Identify visible land cover, vegetation, water bodies, buildings, roads, agriculture and any notable spatial patterns."
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [answer, setAnswer] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [activeScene, setActiveScene] = useState(null);
+  const [activeAreaBounds, setActiveAreaBounds] = useState(null);
+  const [ndviResult, setNdviResult] = useState(null);
+  const [ndviError, setNdviError] = useState("");
 
   // =========================================================
   // PROCESS IMAGE
@@ -59,6 +65,8 @@ export default function ImageAnalysis() {
 
     setError("");
     setAnswer(null);
+    setNdviResult(null);
+    setNdviError("");
 
     const ext = getExtension(file.name);
 
@@ -107,15 +115,112 @@ export default function ImageAnalysis() {
       setDimensions(`${ext.replace(".", "").toUpperCase()} satellite image`);
     }
   };
+  // =========================================================
+// LOAD SENTINEL-2 SCENE FROM GEOLOCATION
+// =========================================================
+
+useEffect(() => {
+  const savedScene = sessionStorage.getItem(
+    "satquery_selected_scene"
+  );
+
+  if (!savedScene) {
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadSelectedScene = async () => {
+    try {
+      const parsed = JSON.parse(savedScene);
+
+      if (!parsed.previewImage) {
+        sessionStorage.removeItem(
+          "satquery_selected_scene"
+        );
+        return;
+      }
+
+      const response = await fetch(
+        parsed.previewImage
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Selected Sentinel-2 preview could not be loaded."
+        );
+      }
+
+      const blob = await response.blob();
+
+      const file = new File(
+        [blob],
+        "sentinel-2-scene.jpg",
+        {
+          type: blob.type || "image/jpeg",
+        }
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      // Keep the selected Sentinel-2 scene and AOI in React state.
+      // NDVI uses these values when the Analyze Image button is clicked.
+      const scene = parsed.scene || null;
+      const bounds = parsed.areaBounds || null;
+
+      setActiveScene(scene);
+      setActiveAreaBounds(bounds);
+
+      processImage(file);
+
+      sessionStorage.setItem(
+        "satquery_active_scene",
+        JSON.stringify({
+          scene,
+          areaBounds: bounds,
+        })
+      );
+
+      sessionStorage.removeItem(
+        "satquery_selected_scene"
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load Sentinel-2 scene:",
+        error
+      );
+
+      if (!cancelled) {
+        setError(
+          error?.message ||
+            "Unable to load the selected Sentinel-2 scene."
+        );
+      }
+    }
+  };
+
+  loadSelectedScene();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
 
   // =========================================================
   // LOAD DEMO IMAGE
   // =========================================================
+  
 
   const loadDemoImage = async () => {
     try {
       setError("");
       setAnswer(null);
+      setNdviResult(null);
+      setNdviError("");
+      setActiveScene(null);
+      setActiveAreaBounds(null);
 
       const response = await fetch(DEMO_IMAGE.path);
 
@@ -133,6 +238,7 @@ export default function ImageAnalysis() {
     } catch (err) {
       setError(err?.message || "Unable to load demo image.");
     }
+    
   };
 
   // =========================================================
@@ -177,30 +283,105 @@ export default function ImageAnalysis() {
     setQuestion("");
     setAnswer(null);
     setError("");
+    setNdviResult(null);
+    setNdviError("");
+    setActiveScene(null);
+    setActiveAreaBounds(null);
   };
 
   // =========================================================
-  // AI ANALYSIS
+  // COMBINED AI + NDVI ANALYSIS
   // =========================================================
 
-  const analyzeWithAI = async () => {
-    if (!selectedFile || !question.trim()) {
+  const analyzeImage = async () => {
+    if (!selectedFile) {
       return;
     }
 
+    const userQuestion =
+      question.trim() ||
+      "Give an overall analysis of this satellite image. Identify visible land cover, vegetation, water bodies, buildings, roads, agriculture and any notable spatial patterns.";
+
     setIsAnalyzing(true);
     setAnswer(null);
+    setNdviResult(null);
+    setNdviError("");
     setError("");
 
     try {
+      let ndviEvidence = "";
+
+      // NDVI is available only when the image came from the
+      // Sentinel-2 GeoLocation workflow with an AOI.
+      if (activeScene && activeAreaBounds) {
+        try {
+          const ndvi = await analyzeNDVI({
+            scene: activeScene,
+            areaBounds: activeAreaBounds,
+          });
+
+          setNdviResult(ndvi);
+
+          const stats = ndvi?.stats || ndvi?.statistics || {};
+          const mean =
+            stats.mean ??
+            ndvi?.mean_ndvi ??
+            ndvi?.mean ??
+            null;
+          const min =
+            stats.min ??
+            ndvi?.min_ndvi ??
+            ndvi?.min ??
+            null;
+          const max =
+            stats.max ??
+            ndvi?.max_ndvi ??
+            ndvi?.max ??
+            null;
+          const vegetation =
+            stats.vegetation_percentage ??
+            ndvi?.vegetation_percentage ??
+            ndvi?.vegetation_percent ??
+            null;
+          const health =
+            stats.vegetation_health ??
+            ndvi?.vegetation_health ??
+            ndvi?.health ??
+            "Unknown";
+
+          ndviEvidence = `
+
+NDVI ANALYSIS EVIDENCE FROM THE SAME SENTINEL-2 AOI:
+Mean NDVI: ${mean !== null ? Number(mean).toFixed(4) : "Unavailable"}
+Minimum NDVI: ${min !== null ? Number(min).toFixed(4) : "Unavailable"}
+Maximum NDVI: ${max !== null ? Number(max).toFixed(4) : "Unavailable"}
+Vegetation area (NDVI > 0.20): ${
+            vegetation !== null ? `${Number(vegetation).toFixed(2)}%` : "Unavailable"
+          }
+Vegetation health: ${health}
+
+Use these numerical NDVI values together with the visible satellite image. Do not invent different NDVI values.`;
+        } catch (ndviErr) {
+          console.error("NDVI analysis failed:", ndviErr);
+          setNdviError(
+            ndviErr?.message ||
+              "NDVI analysis failed. AI image analysis will continue."
+          );
+        }
+      }
+
+      const combinedQuestion = `${userQuestion}${ndviEvidence}`;
+
       const result = await askVQA({
         file: selectedFile,
-        question: question.trim(),
+        question: combinedQuestion,
       });
 
       setAnswer(result);
     } catch (err) {
-      setError(err?.message || "Unable to connect to the AI backend.");
+      setError(
+        err?.message || "Unable to connect to the AI backend."
+      );
     } finally {
       setIsAnalyzing(false);
     }
@@ -501,7 +682,9 @@ export default function ImageAnalysis() {
 
               <p className="mt-3 text-sm leading-6 text-gray-400">
                 {previewUrl
-                  ? "Your satellite image is ready. Ask a question to begin analysis."
+                  ? activeScene
+                    ? "Sentinel-2 image ready. Analyze to run AI image understanding + NDVI for the selected AOI."
+                    : "Your satellite image is ready. Analyze it with AI or ask a question."
                   : "Upload a satellite image first to enable AI analysis."}
               </p>
             </div>
@@ -509,7 +692,7 @@ export default function ImageAnalysis() {
             {/* QUESTION */}
             <div className="mt-6">
               <label className="mb-2 block text-xs uppercase tracking-wider text-gray-500">
-                Your Question
+                Your Question <span className="text-gray-700">(optional)</span>
               </label>
 
               <textarea
@@ -526,20 +709,106 @@ export default function ImageAnalysis() {
               />
             </div>
 
-            {/* ANALYZE */}
+            {/* COMBINED ANALYSIS */}
             <button
-              disabled={!previewUrl || !question.trim() || isAnalyzing}
-              onClick={analyzeWithAI}
+              disabled={!previewUrl || isAnalyzing}
+              onClick={analyzeImage}
               className={`mt-4 w-full rounded-xl py-3.5 font-semibold transition ${
-                previewUrl && question.trim() && !isAnalyzing
+                previewUrl && !isAnalyzing
                   ? "bg-blue-500 shadow-lg shadow-blue-500/20 hover:bg-blue-400"
                   : "cursor-not-allowed bg-gray-700 text-gray-500"
               }`}
             >
               {isAnalyzing
-                ? "Analyzing satellite image..."
-                : "Analyze with AI ✦"}
+                ? activeScene
+                  ? "Analyzing AI + NDVI..."
+                  : "Analyzing satellite image..."
+                : "Analyze Image ✦"}
             </button>
+
+            {/* NDVI RESULT */}
+            {ndviResult && (
+              <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-emerald-400">
+                    NDVI Analysis
+                  </p>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-300">
+                    SENTINEL-2
+                  </span>
+                </div>
+
+                {(ndviResult.ndvi_map ||
+                  ndviResult.map ||
+                  ndviResult.image ||
+                  ndviResult.image_url) && (
+                  <img
+                    src={
+                      ndviResult.ndvi_map ||
+                      ndviResult.map ||
+                      ndviResult.image ||
+                      ndviResult.image_url
+                    }
+                    alt="NDVI map"
+                    className="mt-4 w-full rounded-xl border border-white/10 object-contain"
+                  />
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <NDVICard
+                    label="Mean"
+                    value={
+                      ndviResult?.stats?.mean ??
+                      ndviResult?.mean_ndvi ??
+                      ndviResult?.mean
+                    }
+                  />
+                  <NDVICard
+                    label="Minimum"
+                    value={
+                      ndviResult?.stats?.min ??
+                      ndviResult?.min_ndvi ??
+                      ndviResult?.min
+                    }
+                  />
+                  <NDVICard
+                    label="Maximum"
+                    value={
+                      ndviResult?.stats?.max ??
+                      ndviResult?.max_ndvi ??
+                      ndviResult?.max
+                    }
+                  />
+                  <NDVICard
+                    label="Vegetation"
+                    value={
+                      ndviResult?.stats?.vegetation_percentage ??
+                      ndviResult?.vegetation_percentage ??
+                      ndviResult?.vegetation_percent
+                    }
+                    suffix="%"
+                  />
+                </div>
+
+                <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                    Vegetation Health
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-gray-200">
+                    {ndviResult?.stats?.vegetation_health ||
+                      ndviResult?.vegetation_health ||
+                      ndviResult?.health ||
+                      "Unavailable"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {ndviError && (
+              <div className="mt-4 rounded-xl border border-yellow-400/20 bg-yellow-400/[0.06] p-3 text-xs leading-5 text-yellow-300">
+                NDVI: {ndviError}
+              </div>
+            )}
 
             {/* ANSWER */}
             {answer && (
@@ -608,6 +877,26 @@ export default function ImageAnalysis() {
           />
         </div>
       </main>
+    </div>
+  );
+}
+
+function NDVICard({ label, value, suffix = "" }) {
+  const numericValue =
+    value !== null && value !== undefined && value !== ""
+      ? Number(value)
+      : null;
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-semibold text-gray-200">
+        {numericValue !== null && Number.isFinite(numericValue)
+          ? `${numericValue.toFixed(2)}${suffix}`
+          : "—"}
+      </p>
     </div>
   );
 }
