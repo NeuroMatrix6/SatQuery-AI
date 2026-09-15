@@ -750,6 +750,85 @@ def extension(name: str) -> str:
 
 
 # ============================================================
+# INDEX MAP VISUALIZATION
+# ============================================================
+
+def create_index_visualization(index_array, valid_mask, index_type):
+    """Create smooth, index-specific scientific visualization."""
+    values = np.asarray(index_array, dtype=np.float32)
+    mask = np.asarray(valid_mask, dtype=bool)
+    clipped = np.clip(values, -1.0, 1.0)
+
+    # Smooth display only; raw scientific values remain unchanged.
+    display_values = cv2.resize(
+        clipped,
+        None,
+        fx=1.0,
+        fy=1.0,
+        interpolation=cv2.INTER_LINEAR,
+    )
+    display_mask = cv2.resize(
+        mask.astype(np.uint8),
+        (display_values.shape[1], display_values.shape[0]),
+        interpolation=cv2.INTER_NEAREST,
+    ).astype(bool)
+
+    ramps = {
+        "ndvi": [
+            (-1.0, (92, 48, 24)),
+            (-0.50, (150, 92, 35)),
+            (0.00, (205, 180, 65)),
+            (0.20, (165, 205, 70)),
+            (0.50, (70, 170, 75)),
+            (1.00, (15, 105, 45)),
+        ],
+        "ndwi": [
+            (-1.0, (55, 55, 55)),
+            (-0.50, (105, 85, 70)),
+            (0.00, (190, 195, 175)),
+            (0.20, (70, 190, 205)),
+            (0.50, (25, 125, 205)),
+            (1.00, (5, 55, 145)),
+        ],
+        "ndbi": [
+            (-1.0, (35, 65, 45)),
+            (-0.50, (65, 105, 70)),
+            (0.00, (190, 185, 145)),
+            (0.20, (235, 175, 65)),
+            (0.50, (225, 85, 35)),
+            (1.00, (155, 25, 25)),
+        ],
+    }
+
+    stops = ramps.get(index_type, ramps["ndvi"])
+    positions = np.array([item[0] for item in stops], dtype=np.float32)
+    colors = np.array([item[1] for item in stops], dtype=np.float32)
+    flat = display_values.ravel()
+    rgb = np.empty((flat.size, 3), dtype=np.float32)
+
+    for channel in range(3):
+        rgb[:, channel] = np.interp(
+            flat,
+            positions,
+            colors[:, channel],
+        )
+
+    colored = np.clip(
+        rgb.reshape(
+            display_values.shape[0],
+            display_values.shape[1],
+            3,
+        ),
+        0,
+        255,
+    ).astype(np.uint8)
+
+    colored[~display_mask] = [0, 0, 0]
+    return Image.fromarray(colored, mode="RGB")
+
+
+
+# ============================================================
 # IMAGE -> AI JPEG DATA URL
 # ============================================================
 
@@ -2216,50 +2295,8 @@ function evaluatePixel(sample) {
 
         # ----------------------------------------------------
         # CREATE NDVI VISUALIZATION
-        #
-        # -1 -> low vegetation
-        #  0 -> bare / water
-        # +1 -> dense vegetation
-        # ----------------------------------------------------
+        ndvi_map = create_index_visualization(ndvi_array, valid_mask, "ndvi")
 
-        clipped = np.clip(
-            ndvi_array,
-            -1.0,
-            1.0
-        )
-
-        # Normalize -1..1 to 0..255
-        normalized = (
-            (clipped + 1.0)
-            / 2.0
-            * 255.0
-        ).astype(np.uint8)
-
-        # OpenCV color map
-        colored = cv2.applyColorMap(
-            normalized,
-            cv2.COLORMAP_TURBO
-        )
-
-        # Convert BGR -> RGB
-        colored = cv2.cvtColor(
-            colored,
-            cv2.COLOR_BGR2RGB
-        )
-
-        # Mask invalid pixels
-        invalid_mask = ~valid_mask
-
-        colored[
-            invalid_mask
-        ] = [0, 0, 0]
-
-        ndvi_map = Image.fromarray(
-            colored,
-            mode="RGB"
-        )
-
-        # ----------------------------------------------------
         # ENCODE NDVI MAP
         # ----------------------------------------------------
 
@@ -2811,47 +2848,8 @@ function evaluatePixel(sample) {
 
         # ----------------------------------------------------
         # CREATE NDWI VISUALIZATION
-        #
-        # -1 -> non-water / dry surface
-        #  0 -> mixed / neutral
-        # +1 -> strong water signal
-        # ----------------------------------------------------
+        ndwi_map = create_index_visualization(ndwi_array, valid_mask, "ndwi")
 
-        clipped = np.clip(
-            ndwi_array,
-            -1.0,
-            1.0
-        )
-
-        normalized = (
-            (clipped + 1.0)
-            / 2.0
-            * 255.0
-        ).astype(np.uint8)
-
-        colored = cv2.applyColorMap(
-            normalized,
-            cv2.COLORMAP_TURBO
-        )
-
-        colored = cv2.cvtColor(
-            colored,
-            cv2.COLOR_BGR2RGB
-        )
-
-        # Mask invalid pixels
-        invalid_mask = ~valid_mask
-
-        colored[
-            invalid_mask
-        ] = [0, 0, 0]
-
-        ndwi_map = Image.fromarray(
-            colored,
-            mode="RGB"
-        )
-
-        # ----------------------------------------------------
         # ENCODE NDWI MAP
         # ----------------------------------------------------
 
@@ -3407,42 +3405,8 @@ function evaluatePixel(sample) {
 
         # ----------------------------------------------------
         # CREATE NDBI VISUALIZATION
-        # ----------------------------------------------------
+        ndbi_map = create_index_visualization(ndbi_array, valid_mask, "ndbi")
 
-        clipped = np.clip(
-            ndbi_array,
-            -1.0,
-            1.0,
-        )
-
-        normalized = (
-            (clipped + 1.0)
-            / 2.0
-            * 255.0
-        ).astype(np.uint8)
-
-        colored = cv2.applyColorMap(
-            normalized,
-            cv2.COLORMAP_TURBO,
-        )
-
-        colored = cv2.cvtColor(
-            colored,
-            cv2.COLOR_BGR2RGB,
-        )
-
-        invalid_mask = ~valid_mask
-
-        colored[
-            invalid_mask
-        ] = [0, 0, 0]
-
-        ndbi_map = Image.fromarray(
-            colored,
-            mode="RGB",
-        )
-
-        # ----------------------------------------------------
         # ENCODE NDBI MAP
         # ----------------------------------------------------
 
