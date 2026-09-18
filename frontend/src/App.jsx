@@ -188,31 +188,50 @@ function App() {
 
       <Routes>
 
-        {/* LANDING PAGE */}
+        {/* =================================================
+            LANDING PAGE
+        ================================================= */}
         <Route
           path="/"
           element={<Home />}
         />
 
-        {/* ANALYSIS HUB */}
+        {/* =================================================
+            ANALYSIS HUB
+        ================================================= */}
         <Route
           path="/analysis"
           element={<Analysis />}
         />
 
-        {/* IMAGE ANALYSIS */}
+        {/* =================================================
+            IMAGE ANALYSIS
+        ================================================= */}
         <Route
           path="/analysis/image"
           element={<ImageAnalysis />}
         />
 
-        {/* CHANGE DETECTION */}
+        {/* =================================================
+            CHANGE DETECTION
+        ================================================= */}
         <Route
           path="/analysis/change-detection"
           element={<ChangeDetection />}
         />
 
-        {/* GEO LOCATION */}
+        {/* =================================================
+            CHANGE DETECTION - SHORT ROUTE
+            Supports /analysis/change
+        ================================================= */}
+        <Route
+          path="/analysis/change"
+          element={<ChangeDetection />}
+        />
+
+        {/* =================================================
+            GEO LOCATION
+        ================================================= */}
         <Route
           path="/analysis/geo"
           element={<GeoLocation />}

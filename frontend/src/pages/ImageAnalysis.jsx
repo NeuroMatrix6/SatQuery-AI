@@ -62,6 +62,20 @@ export default function ImageAnalysis() {
   const [activeScene, setActiveScene] = useState(null);
   const [activeAreaBounds, setActiveAreaBounds] = useState(null);
 
+  // =========================================================
+  // PHASE 8A — MULTI-TEMPORAL SCENE RETRIEVAL
+  // =========================================================
+  const [multiTemporalScenes, setMultiTemporalScenes] = useState([]);
+  const [multiTemporalError, setMultiTemporalError] = useState("");
+  const [isMultiTemporalLoading, setIsMultiTemporalLoading] = useState(false);
+
+  const [multiTemporalStartYear, setMultiTemporalStartYear] = useState("2022");
+  const [multiTemporalEndYear, setMultiTemporalEndYear] = useState("2026");
+  const [multiTemporalMonth, setMultiTemporalMonth] = useState("1");
+  const [multiTemporalDay, setMultiTemporalDay] = useState("1");
+  const [multiTemporalWindowDays, setMultiTemporalWindowDays] = useState("30");
+  const [multiTemporalCloudCover, setMultiTemporalCloudCover] = useState("30");
+
   // NDVI
   const [ndviResult, setNdviResult] = useState(null);
   const [ndviError, setNdviError] = useState("");
@@ -73,6 +87,16 @@ export default function ImageAnalysis() {
   // NDBI
   const [ndbiResult, setNdbiResult] = useState(null);
   const [ndbiError, setNdbiError] = useState("");
+
+  // Combined Land Intelligence (Phase 6)
+  const [combinedLandResult, setCombinedLandResult] = useState(null);
+  const [combinedLandError, setCombinedLandError] = useState("");
+  const [isCombinedLandAnalyzing, setIsCombinedLandAnalyzing] = useState(false);
+const [multispectralChangeResult, setMultispectralChangeResult] = useState(null);
+const [multispectralChangeError, setMultispectralChangeError] = useState("");
+const [isMultispectralChangeAnalyzing, setIsMultispectralChangeAnalyzing] = useState(false);
+const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
+
 
   // =========================================================
   // PROCESS IMAGE
@@ -93,11 +117,21 @@ export default function ImageAnalysis() {
     setNdbiResult(null);
     setNdbiError("");
 
+    setCombinedLandResult(null);
+    setCombinedLandError("");
+      setMultispectralChangeResult(null);
+      setMultispectralChangeError("");
+      setMultispectralAiInsight(null);
+
+
     if (!options.keepScene) {
       setActiveScene(null);
       setActiveAreaBounds(null);
+      setMultiTemporalScenes([]);
+      setMultiTemporalError("");
 
       sessionStorage.removeItem("satquery_active_scene");
+      sessionStorage.removeItem("satquery_multi_temporal_scenes");
     }
 
     const ext = getExtension(file.name);
@@ -259,6 +293,9 @@ export default function ImageAnalysis() {
       setNdbiResult(null);
       setNdbiError("");
 
+      setCombinedLandResult(null);
+      setCombinedLandError("");
+
       setActiveScene(null);
       setActiveAreaBounds(null);
 
@@ -339,15 +376,519 @@ export default function ImageAnalysis() {
     setNdbiResult(null);
     setNdbiError("");
 
+    setCombinedLandResult(null);
+    setCombinedLandError("");
+
     setActiveScene(null);
     setActiveAreaBounds(null);
+    setMultiTemporalScenes([]);
+    setMultiTemporalError("");
+    sessionStorage.removeItem("satquery_multi_temporal_scenes");
   };
 
   // =========================================================
   // COMBINED AI + NDVI + NDWI + NDBI ANALYSIS
   // =========================================================
 
-  const analyzeImage = async () => {
+  // =========================================================
+  // PHASE 8A — MULTI-TEMPORAL SCENE RETRIEVAL
+  // =========================================================
+
+  const retrieveMultiTemporalScenes = async () => {
+    setMultiTemporalError("");
+
+    if (!activeAreaBounds) {
+      setMultiTemporalError(
+        "Please select an Analysis Area (AOI) in GeoLocation first."
+      );
+      return;
+    }
+
+    const startYear = Number(multiTemporalStartYear);
+    const endYear = Number(multiTemporalEndYear);
+    const targetMonth = Number(multiTemporalMonth);
+    const targetDay = Number(multiTemporalDay);
+    const windowDays = Number(multiTemporalWindowDays);
+    const maxCloudCover = Number(multiTemporalCloudCover);
+
+    if (
+      !Number.isInteger(startYear) ||
+      !Number.isInteger(endYear) ||
+      startYear < 2015 ||
+      endYear < 2015 ||
+      endYear < startYear
+    ) {
+      setMultiTemporalError(
+        "Enter valid years from 2015 onward, with End Year greater than or equal to Start Year."
+      );
+      return;
+    }
+
+    if (endYear - startYear > 10) {
+      setMultiTemporalError("Phase 8A supports a maximum 10-year analysis span.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(targetMonth) ||
+      targetMonth < 1 ||
+      targetMonth > 12
+    ) {
+      setMultiTemporalError("Target month must be between 1 and 12.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(targetDay) ||
+      targetDay < 1 ||
+      targetDay > 31
+    ) {
+      setMultiTemporalError("Target day must be between 1 and 31.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(windowDays) ||
+      windowDays < 0 ||
+      windowDays > 180
+    ) {
+      setMultiTemporalError("Search window must be between 0 and 180 days.");
+      return;
+    }
+
+    if (
+      !Number.isFinite(maxCloudCover) ||
+      maxCloudCover < 0 ||
+      maxCloudCover > 100
+    ) {
+      setMultiTemporalError("Maximum cloud cover must be between 0 and 100%.");
+      return;
+    }
+
+    const firstCorner = activeAreaBounds?.[0];
+    const secondCorner = activeAreaBounds?.[1];
+
+    if (
+      !Array.isArray(firstCorner) ||
+      !Array.isArray(secondCorner) ||
+      firstCorner.length < 2 ||
+      secondCorner.length < 2
+    ) {
+      setMultiTemporalError("The selected AOI bounds are invalid.");
+      return;
+    }
+
+    const south = Math.min(Number(firstCorner[0]), Number(secondCorner[0]));
+    const north = Math.max(Number(firstCorner[0]), Number(secondCorner[0]));
+    const west = Math.min(Number(firstCorner[1]), Number(secondCorner[1]));
+    const east = Math.max(Number(firstCorner[1]), Number(secondCorner[1]));
+
+    if (
+      ![west, south, east, north].every(Number.isFinite) ||
+      west >= east ||
+      south >= north
+    ) {
+      setMultiTemporalError("The selected AOI coordinates are invalid.");
+      return;
+    }
+
+    setIsMultiTemporalLoading(true);
+    setMultiTemporalScenes([]);
+
+    try {
+      const apiBase =
+        import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+      const form = new FormData();
+      form.append("west", String(west));
+      form.append("south", String(south));
+      form.append("east", String(east));
+      form.append("north", String(north));
+      form.append("start_year", String(startYear));
+      form.append("end_year", String(endYear));
+      form.append("target_month", String(targetMonth));
+      form.append("target_day", String(targetDay));
+      form.append("window_days", String(windowDays));
+      form.append("max_cloud_cover", String(maxCloudCover));
+
+      const response = await fetch(
+        `${apiBase}/api/multi-temporal-scenes`,
+        {
+          method: "POST",
+          body: form,
+        }
+      );
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Phase 8A returned an invalid server response.");
+      }
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.error || "Multi-temporal satellite scene retrieval failed."
+        );
+      }
+
+      const scenes = Array.isArray(data.scenes)
+        ? [...data.scenes].sort(
+            (a, b) =>
+              Number(a?.analysis_year || 0) -
+              Number(b?.analysis_year || 0)
+          )
+        : [];
+
+      setMultiTemporalScenes(scenes);
+
+      sessionStorage.setItem(
+        "satquery_multi_temporal_scenes",
+        JSON.stringify({
+          phase: "8A",
+          aoi: [west, south, east, north],
+          query: data.query || {
+            start_year: startYear,
+            end_year: endYear,
+            target_month: targetMonth,
+            target_day: targetDay,
+            window_days: windowDays,
+            max_cloud_cover: maxCloudCover,
+          },
+          scenes,
+          requested_years: data.requested_years || [],
+          retrieved_years: data.retrieved_years || [],
+          missing_years: data.missing_years || [],
+          same_aoi: true,
+        })
+      );
+
+      if (!scenes.length) {
+        setMultiTemporalError(
+          "No Sentinel-2 scenes matched the Phase 8A search criteria."
+        );
+      }
+    } catch (err) {
+      console.error("PHASE 8A MULTI-TEMPORAL RETRIEVAL ERROR:", err);
+      setMultiTemporalError(
+        err?.message ||
+          "Unable to retrieve multi-temporal Sentinel-2 scenes."
+      );
+    } finally {
+      setIsMultiTemporalLoading(false);
+    }
+  };
+
+  // =========================================================
+  // COMBINED AI + NDVI + NDWI + NDBI ANALYSIS
+  // =========================================================
+
+  const analyzeCombinedLandIntelligence = async ({ ndvi, ndwi, ndbi }) => {
+    setCombinedLandError("");
+    setCombinedLandResult(null);
+
+    const getNumber = (...values) => {
+      for (const value of values) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) return numeric;
+      }
+      return null;
+    };
+
+    const meanNdvi = getNumber(ndvi?.stats?.mean, ndvi?.mean_ndvi, ndvi?.mean);
+    const vegetationPercentage = getNumber(
+      ndvi?.stats?.vegetation_percentage,
+      ndvi?.vegetation_percentage,
+      ndvi?.vegetation_percent
+    );
+
+    const meanNdwi = getNumber(ndwi?.stats?.mean, ndwi?.mean_ndwi, ndwi?.mean);
+    const waterPercentage = getNumber(
+      ndwi?.stats?.water_percentage,
+      ndwi?.water_percentage,
+      ndwi?.water_percent
+    );
+
+    const meanNdbi = getNumber(ndbi?.stats?.mean, ndbi?.mean_ndbi, ndbi?.mean);
+    const builtupPercentage = getNumber(
+      ndbi?.stats?.builtup_percentage,
+      ndbi?.builtup_percentage,
+      ndbi?.builtup_percent
+    );
+
+    if (
+      meanNdvi === null ||
+      vegetationPercentage === null ||
+      meanNdwi === null ||
+      waterPercentage === null ||
+      meanNdbi === null ||
+      builtupPercentage === null
+    ) {
+      setCombinedLandError(
+        "Combined Land Intelligence needs valid NDVI, NDWI and NDBI statistics."
+      );
+      return;
+    }
+
+    setIsCombinedLandAnalyzing(true);
+
+    try {
+      const apiBase =
+        import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+      // Phase 6A — Combine index statistics
+      const combinedForm = new FormData();
+      combinedForm.append("mean_ndvi", String(meanNdvi));
+      combinedForm.append("vegetation_percentage", String(vegetationPercentage));
+      combinedForm.append("mean_ndwi", String(meanNdwi));
+      combinedForm.append("water_percentage", String(waterPercentage));
+      combinedForm.append("mean_ndbi", String(meanNdbi));
+      combinedForm.append("builtup_percentage", String(builtupPercentage));
+
+      const combinedResponse = await fetch(
+        `${apiBase}/api/combined-land-intelligence`,
+        { method: "POST", body: combinedForm }
+      );
+
+      if (!combinedResponse.ok) {
+        throw new Error("Combined Land Intelligence request failed.");
+      }
+
+      const combinedData = await combinedResponse.json();
+
+      // Phase 6B — Land Characteristics
+      const landValues = {
+        Vegetation: vegetationPercentage,
+        Water: waterPercentage,
+        "Built-up": builtupPercentage,
+      };
+
+      const sorted = Object.entries(landValues).sort((a, b) => b[1] - a[1]);
+      const dominantType = sorted[0][0];
+      const dominantPercentage = sorted[0][1];
+      const classification =
+        dominantPercentage - sorted[1][1] < 10
+          ? "Mixed Land Characteristics"
+          : `${dominantType} Dominant`;
+
+      // Phase 6C — Combined Statistics
+      const classifiedTotalPercentage =
+        vegetationPercentage + waterPercentage + builtupPercentage;
+      const overlapDetected = classifiedTotalPercentage > 100;
+      const otherPercentage = overlapDetected
+        ? 0
+        : 100 - classifiedTotalPercentage;
+
+      // Phase 6D — AI Land Insight
+      const aiForm = new FormData();
+      aiForm.append("mean_ndvi", String(meanNdvi));
+      aiForm.append("vegetation_percentage", String(vegetationPercentage));
+      aiForm.append("mean_ndwi", String(meanNdwi));
+      aiForm.append("water_percentage", String(waterPercentage));
+      aiForm.append("mean_ndbi", String(meanNdbi));
+      aiForm.append("builtup_percentage", String(builtupPercentage));
+      aiForm.append("dominant_type", dominantType);
+      aiForm.append("dominant_percentage", String(dominantPercentage));
+      aiForm.append("classification", classification);
+      aiForm.append(
+        "classified_total_percentage",
+        String(classifiedTotalPercentage)
+      );
+      aiForm.append("other_percentage", String(otherPercentage));
+      aiForm.append("overlap_detected", String(overlapDetected));
+
+      const aiResponse = await fetch(
+        `${apiBase}/api/combined-land-ai-insight`,
+        { method: "POST", body: aiForm }
+      );
+
+      if (!aiResponse.ok) {
+        throw new Error("Combined AI Land Insight request failed.");
+      }
+
+      const aiData = await aiResponse.json();
+
+      setCombinedLandResult({
+        ...combinedData,
+        land_characteristics: {
+          dominant_type: dominantType,
+          dominant_percentage: dominantPercentage,
+          classification,
+          composition: {
+            vegetation: vegetationPercentage,
+            water: waterPercentage,
+            builtup: builtupPercentage,
+          },
+        },
+        combined_statistics: {
+          vegetation_percentage: vegetationPercentage,
+          water_percentage: waterPercentage,
+          builtup_percentage: builtupPercentage,
+          classified_total_percentage: classifiedTotalPercentage,
+          other_percentage: otherPercentage,
+          overlap_detected: overlapDetected,
+        },
+        ai_insight: aiData,
+      });
+    } catch (err) {
+      console.error("Combined Land Intelligence failed:", err);
+      setCombinedLandError(
+        err?.message || "Combined Land Intelligence could not be completed."
+      );
+    } finally {
+      setIsCombinedLandAnalyzing(false);
+    }
+  };
+
+  
+  // =========================================================
+  // PHASE 7 — MULTISPECTRAL CHANGE DETECTION
+  // =========================================================
+  const analyzeMultispectralChange = async ({ before, after }) => {
+    setMultispectralChangeError("");
+    setMultispectralChangeResult(null);
+    setMultispectralAiInsight(null);
+    setIsMultispectralChangeAnalyzing(true);
+
+    try {
+      const apiBase =
+        import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+      const getNumber = (...values) => {
+        for (const value of values) {
+          const numeric = Number(value);
+          if (Number.isFinite(numeric)) return numeric;
+        }
+        return null;
+      };
+
+      const metricValues = {
+        before_mean_ndvi: getNumber(
+          before?.ndvi?.mean_ndvi,
+          before?.ndvi?.stats?.mean,
+          before?.ndvi?.mean
+        ),
+        after_mean_ndvi: getNumber(
+          after?.ndvi?.mean_ndvi,
+          after?.ndvi?.stats?.mean,
+          after?.ndvi?.mean
+        ),
+        before_vegetation_percentage: getNumber(
+          before?.ndvi?.vegetation_percentage,
+          before?.ndvi?.stats?.vegetation_percentage,
+          before?.ndvi?.vegetation_percent
+        ),
+        after_vegetation_percentage: getNumber(
+          after?.ndvi?.vegetation_percentage,
+          after?.ndvi?.stats?.vegetation_percentage,
+          after?.ndvi?.vegetation_percent
+        ),
+        before_mean_ndwi: getNumber(
+          before?.ndwi?.mean_ndwi,
+          before?.ndwi?.stats?.mean,
+          before?.ndwi?.mean
+        ),
+        after_mean_ndwi: getNumber(
+          after?.ndwi?.mean_ndwi,
+          after?.ndwi?.stats?.mean,
+          after?.ndwi?.mean
+        ),
+        before_water_percentage: getNumber(
+          before?.ndwi?.water_percentage,
+          before?.ndwi?.stats?.water_percentage,
+          before?.ndwi?.water_percent
+        ),
+        after_water_percentage: getNumber(
+          after?.ndwi?.water_percentage,
+          after?.ndwi?.stats?.water_percentage,
+          after?.ndwi?.water_percent
+        ),
+        before_mean_ndbi: getNumber(
+          before?.ndbi?.mean_ndbi,
+          before?.ndbi?.stats?.mean,
+          before?.ndbi?.mean
+        ),
+        after_mean_ndbi: getNumber(
+          after?.ndbi?.mean_ndbi,
+          after?.ndbi?.stats?.mean,
+          after?.ndbi?.mean
+        ),
+        before_builtup_percentage: getNumber(
+          before?.ndbi?.builtup_percentage,
+          before?.ndbi?.stats?.builtup_percentage,
+          before?.ndbi?.builtup_percent
+        ),
+        after_builtup_percentage: getNumber(
+          after?.ndbi?.builtup_percentage,
+          after?.ndbi?.stats?.builtup_percentage,
+          after?.ndbi?.builtup_percent
+        ),
+      };
+
+      const missing = Object.entries(metricValues)
+        .filter(([, value]) => value === null)
+        .map(([key]) => key);
+
+      if (missing.length) {
+        throw new Error(
+          `Multispectral comparison needs valid before/after NDVI, NDWI and NDBI statistics. Missing: ${missing.join(", ")}`
+        );
+      }
+
+      const form = new FormData();
+      Object.entries(metricValues).forEach(([key, value]) => {
+        form.append(key, String(value));
+      });
+
+      const response = await fetch(
+        `${apiBase}/api/multispectral-change-detection`,
+        { method: "POST", body: form }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.error || "Multispectral change detection failed."
+        );
+      }
+
+      setMultispectralChangeResult(data);
+
+      const aiForm = new FormData();
+      Object.entries(metricValues).forEach(([key, value]) => {
+        aiForm.append(key, String(value));
+      });
+      aiForm.append(
+        "change_summary",
+        data?.interpretation?.summary || ""
+      );
+
+      const aiResponse = await fetch(
+        `${apiBase}/api/multispectral-change-ai-insight`,
+        { method: "POST", body: aiForm }
+      );
+
+      const aiData = await aiResponse.json();
+
+      if (aiResponse.ok && aiData?.success) {
+        setMultispectralAiInsight(aiData);
+      } else {
+        setMultispectralChangeError(
+          aiData?.error || "Multispectral AI insight failed."
+        );
+      }
+    } catch (err) {
+      console.error("Multispectral change failed:", err);
+      setMultispectralChangeError(
+        err?.message || "Unable to calculate multispectral change."
+      );
+    } finally {
+      setIsMultispectralChangeAnalyzing(false);
+    }
+  };
+
+const analyzeImage = async () => {
     if (!selectedFile) {
       return;
     }
@@ -375,6 +916,10 @@ export default function ImageAnalysis() {
       let ndwiEvidence = "";
       let ndbiEvidence = "";
 
+      let latestNdviResult = null;
+      let latestNdwiResult = null;
+      let latestNdbiResult = null;
+
       // =====================================================
       // NDVI
       // =====================================================
@@ -387,6 +932,7 @@ export default function ImageAnalysis() {
           });
 
           setNdviResult(ndvi);
+          latestNdviResult = ndvi;
 
           const stats =
             ndvi?.stats ||
@@ -474,6 +1020,7 @@ Use these numerical NDVI values together with the visible satellite image. Do no
           });
 
           setNdwiResult(ndwi);
+          latestNdwiResult = ndwi;
 
           const stats =
             ndwi?.stats ||
@@ -561,6 +1108,7 @@ Use these numerical NDWI values together with the visible satellite image. Do no
           });
 
           setNdbiResult(ndbi);
+          latestNdbiResult = ndbi;
 
           const stats =
             ndbi?.stats ||
@@ -637,6 +1185,24 @@ Use these numerical NDBI values together with the visible satellite image. Do no
       }
 
       // =====================================================
+      // PHASE 6 — COMBINED LAND INTELLIGENCE
+      // =====================================================
+
+      if (activeScene && activeAreaBounds) {
+        if (latestNdviResult && latestNdwiResult && latestNdbiResult) {
+          await analyzeCombinedLandIntelligence({
+            ndvi: latestNdviResult,
+            ndwi: latestNdwiResult,
+            ndbi: latestNdbiResult,
+          });
+        } else {
+          setCombinedLandError(
+            "Combined Land Intelligence needs successful NDVI, NDWI and NDBI results."
+          );
+        }
+      }
+
+      // =====================================================
       // SEND ALL EVIDENCE TO AI
       // =====================================================
 
@@ -684,6 +1250,170 @@ Use these numerical NDBI values together with the visible satellite image. Do no
   // =========================================================
   // UI
   // =========================================================
+
+
+  const renderMultispectralChange = () => {
+    if (
+      !multispectralChangeResult &&
+      !isMultispectralChangeAnalyzing &&
+      !multispectralChangeError
+    ) {
+      return null;
+    }
+
+    const comparison = multispectralChangeResult?.comparison || {};
+    const interpretation = multispectralChangeResult?.interpretation || {};
+
+    const cards = [
+      {
+        label: "Vegetation",
+        metric: "NDVI",
+        data: comparison.ndvi,
+        percentage: comparison.vegetation,
+      },
+      {
+        label: "Water",
+        metric: "NDWI",
+        data: comparison.ndwi,
+        percentage: comparison.water,
+      },
+      {
+        label: "Built-up",
+        metric: "NDBI",
+        data: comparison.ndbi,
+        percentage: comparison.builtup,
+      },
+    ];
+
+    return (
+      <section className="mt-10 rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-blue-400">
+              Phase 7
+            </p>
+            <h3 className="mt-1 text-2xl font-semibold">
+              Multispectral Change Detection
+            </h3>
+            <p className="mt-2 text-sm text-gray-400">
+              Before → After comparison using NDVI, NDWI and NDBI.
+            </p>
+          </div>
+
+          {multispectralChangeResult?.success && (
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
+              ANALYSIS COMPLETE
+            </span>
+          )}
+        </div>
+
+        {isMultispectralChangeAnalyzing && (
+          <div className="mb-5 rounded-2xl border border-blue-400/20 bg-blue-400/10 p-4 text-sm text-blue-200">
+            Comparing multispectral indicators and generating AI insight...
+          </div>
+        )}
+
+        {multispectralChangeError && (
+          <div className="mb-5 rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-300">
+            {multispectralChangeError}
+          </div>
+        )}
+
+        {multispectralChangeResult?.success && (
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              {cards.map((card) => {
+                const direction = card.percentage?.direction || card.data?.direction;
+                const change =
+                  card.percentage?.change_percentage_points ??
+                  card.data?.change ??
+                  0;
+
+                return (
+                  <div
+                    key={card.label}
+                    className="rounded-2xl border border-white/10 bg-black/20 p-5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-400">{card.label}</p>
+                      <span className="text-xs text-gray-500">{card.metric}</span>
+                    </div>
+
+                    <div className="mt-4 flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-gray-500">Before → After</p>
+                        <p className="mt-1 text-lg font-semibold">
+                          {card.percentage?.before_percentage?.toFixed?.(2) ??
+                            card.data?.before?.toFixed?.(4) ??
+                            "—"}
+                          {" → "}
+                          {card.percentage?.after_percentage?.toFixed?.(2) ??
+                            card.data?.after?.toFixed?.(4) ??
+                            "—"}
+                          {card.percentage ? "%" : ""}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                          direction === "increase"
+                            ? "bg-emerald-400/10 text-emerald-300"
+                            : direction === "decrease"
+                              ? "bg-red-400/10 text-red-300"
+                              : "bg-white/10 text-gray-300"
+                        }`}
+                      >
+                        {direction || "stable"}
+                      </span>
+                    </div>
+
+                    <p className="mt-3 text-xs text-gray-500">
+                      Change: {Number(change).toFixed(2)}
+                      {card.percentage ? " percentage points" : ""}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
+                Detected Changes
+              </p>
+              <p className="mt-2 text-sm text-gray-200">
+                {interpretation.summary || "No major category-level change"}
+              </p>
+            </div>
+
+            {multispectralAiInsight?.success && (
+              <div className="mt-5 rounded-2xl border border-purple-400/20 bg-purple-400/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-purple-300">
+                    AI Change Insight
+                  </p>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] text-gray-400">
+                    {multispectralAiInsight.mode === "live"
+                      ? "LIVE MODEL"
+                      : "DEMO FALLBACK"}
+                  </span>
+                </div>
+
+                <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-gray-200">
+                  {multispectralAiInsight.insight}
+                </div>
+              </div>
+            )}
+
+            <p className="mt-4 text-xs leading-5 text-gray-500">
+              NDVI, NDWI and NDBI percentage indicators are independent
+              measurements and may overlap; they are not forced into a
+              mutually-exclusive 100% land-cover partition.
+            </p>
+          </>
+        )}
+      </section>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#030712] text-white">
@@ -745,6 +1475,228 @@ Use these numerical NDBI values together with the visible satellite image. Do no
             and other visible features.
           </p>
         </div>
+
+        {/* =================================================
+            PHASE 8A — MULTI-TEMPORAL ANALYSIS
+            ================================================= */}
+
+        <section className="mb-8 overflow-hidden rounded-3xl border border-cyan-400/20 bg-cyan-500/[0.035] shadow-2xl">
+          <div className="border-b border-white/10 bg-cyan-500/[0.04] px-6 py-6">
+            <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+              <div>
+                <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">
+                  Phase 8A · Multi-Temporal Analysis
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold">
+                  Multi-Year Satellite Scenes
+                </h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
+                  Retrieve one representative Sentinel-2 scene for each year
+                  over the same selected AOI. Phase 8A retrieves scene metadata
+                  only; spectral analysis comes later.
+                </p>
+              </div>
+
+              <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-wider ${
+                isMultiTemporalLoading
+                  ? "border-yellow-400/20 bg-yellow-400/10 text-yellow-400"
+                  : multiTemporalScenes.length
+                  ? "border-green-400/20 bg-green-400/10 text-green-400"
+                  : "border-white/10 bg-white/5 text-gray-500"
+              }`}>
+                {isMultiTemporalLoading
+                  ? "RETRIEVING"
+                  : multiTemporalScenes.length
+                  ? "SCENES READY"
+                  : "READY"}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {!activeAreaBounds && (
+              <div className="mb-5 rounded-2xl border border-yellow-400/20 bg-yellow-400/[0.05] p-4">
+                <p className="text-sm font-medium text-yellow-300">
+                  Select an Analysis Area first
+                </p>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Go to GeoLocation, select the AOI you want to study, then
+                  open Image Analysis.
+                </p>
+              </div>
+            )}
+
+            {activeAreaBounds && (
+              <div className="mb-5 rounded-2xl border border-cyan-400/15 bg-black/20 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Active AOI
+                    </p>
+                    <p className="mt-1 text-sm text-gray-300">
+                      The same selected area will be used for every requested
+                      year.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] text-cyan-300">
+                    AOI LOCKED
+                  </span>
+                </div>
+
+                <p className="mt-3 break-all text-xs text-gray-500">
+                  {JSON.stringify(activeAreaBounds)}
+                </p>
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <TemporalInput
+                label="Start Year"
+                type="number"
+                min="2015"
+                value={multiTemporalStartYear}
+                onChange={setMultiTemporalStartYear}
+              />
+              <TemporalInput
+                label="End Year"
+                type="number"
+                min="2015"
+                value={multiTemporalEndYear}
+                onChange={setMultiTemporalEndYear}
+              />
+              <TemporalInput
+                label="Target Month"
+                type="number"
+                min="1"
+                max="12"
+                value={multiTemporalMonth}
+                onChange={setMultiTemporalMonth}
+              />
+              <TemporalInput
+                label="Target Day"
+                type="number"
+                min="1"
+                max="31"
+                value={multiTemporalDay}
+                onChange={setMultiTemporalDay}
+              />
+              <TemporalInput
+                label="Search Window (± days)"
+                type="number"
+                min="0"
+                max="180"
+                value={multiTemporalWindowDays}
+                onChange={setMultiTemporalWindowDays}
+              />
+              <TemporalInput
+                label="Max Cloud Cover %"
+                type="number"
+                min="0"
+                max="100"
+                value={multiTemporalCloudCover}
+                onChange={setMultiTemporalCloudCover}
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col items-center gap-3">
+              <button
+                type="button"
+                onClick={retrieveMultiTemporalScenes}
+                disabled={!activeAreaBounds || isMultiTemporalLoading}
+                className={`rounded-2xl px-8 py-3.5 text-sm font-semibold shadow-xl transition ${
+                  activeAreaBounds && !isMultiTemporalLoading
+                    ? "bg-cyan-500 text-black shadow-cyan-500/20 hover:scale-[1.02] hover:bg-cyan-400"
+                    : "cursor-not-allowed bg-gray-700 text-gray-500"
+                }`}
+              >
+                {isMultiTemporalLoading ? (
+                  <>
+                    <span className="mr-2 inline-block animate-spin">◌</span>
+                    Retrieving Year-wise Scenes...
+                  </>
+                ) : (
+                  <>🛰️ Retrieve Multi-Year Scenes</>
+                )}
+              </button>
+
+              <p className="text-[11px] text-gray-600">
+                Default study period: 2022 → 2026
+              </p>
+            </div>
+
+            {multiTemporalError && (
+              <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/[0.05] p-4">
+                <p className="text-sm leading-6 text-red-300">
+                  {multiTemporalError}
+                </p>
+              </div>
+            )}
+
+            {multiTemporalScenes.length > 0 && (
+              <div className="mt-6">
+                <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-400">
+                      Retrieved Scenes
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      One representative Sentinel-2 scene for each available
+                      year.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-gray-400">
+                    {multiTemporalScenes.length} YEAR
+                    {multiTemporalScenes.length === 1 ? "" : "S"} FOUND
+                  </span>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {multiTemporalScenes.map((scene, index) => (
+                    <div
+                      key={`${scene?.analysis_year || "year"}-${scene?.id || index}`}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-lg font-semibold text-cyan-300">
+                          {scene?.analysis_year || "—"}
+                        </span>
+                        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-400">
+                          Sentinel-2
+                        </span>
+                      </div>
+
+                      <div className="mt-4 space-y-2 text-xs">
+                        <div>
+                          <span className="text-gray-600">Acquisition</span>
+                          <p className="mt-0.5 text-gray-300">
+                            {scene?.acquisition_date
+                              ? String(scene.acquisition_date).slice(0, 10)
+                              : "Unavailable"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Cloud Cover</span>
+                          <p className="mt-0.5 text-gray-300">
+                            {scene?.cloud_cover !== null &&
+                            scene?.cloud_cover !== undefined
+                              ? `${Number(scene.cloud_cover).toFixed(2)}%`
+                              : "Unavailable"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Scene ID</span>
+                          <p className="mt-0.5 break-all text-gray-400">
+                            {scene?.id || "Unavailable"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* WORKSPACE */}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -1311,6 +2263,136 @@ Use these numerical NDBI values together with the visible satellite image. Do no
             )}
 
             {/* =================================================
+                PHASE 6 — COMBINED LAND INTELLIGENCE
+                ================================================= */}
+
+            {combinedLandResult && (
+              <div className="mt-6 rounded-2xl border border-violet-400/20 bg-violet-400/[0.05] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-violet-400">
+                      Combined Land Intelligence
+                    </p>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      NDVI + NDWI + NDBI • Same Sentinel-2 AOI
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[10px] text-violet-300">
+                    PHASE 6
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <MetricCard
+                    label="Vegetation"
+                    value={combinedLandResult.summary?.vegetation_percentage}
+                    suffix="%"
+                  />
+                  <MetricCard
+                    label="Water"
+                    value={combinedLandResult.summary?.water_percentage}
+                    suffix="%"
+                  />
+                  <MetricCard
+                    label="Built-up"
+                    value={combinedLandResult.summary?.builtup_percentage}
+                    suffix="%"
+                  />
+                </div>
+
+                {combinedLandResult.land_characteristics && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Land Characteristics
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-sm text-gray-300">
+                        {combinedLandResult.land_characteristics.classification}
+                      </span>
+                      <span className="text-sm font-semibold text-violet-300">
+                        {Number(
+                          combinedLandResult.land_characteristics.dominant_percentage
+                        ).toFixed(2)}%
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Dominant type:{" "}
+                      {combinedLandResult.land_characteristics.dominant_type}
+                    </p>
+                  </div>
+                )}
+
+                {combinedLandResult.combined_statistics && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Combined Statistics
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500">Classified total</span>
+                        <p className="mt-1 font-medium text-gray-200">
+                          {Number(
+                            combinedLandResult.combined_statistics
+                              .classified_total_percentage
+                          ).toFixed(2)}%
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Other</span>
+                        <p className="mt-1 font-medium text-gray-200">
+                          {Number(
+                            combinedLandResult.combined_statistics
+                              .other_percentage
+                          ).toFixed(2)}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-yellow-400/10 bg-yellow-400/[0.04] px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                        Index overlap
+                      </p>
+                      <p className="mt-1 text-xs text-gray-300">
+                        {combinedLandResult.combined_statistics.overlap_detected
+                          ? "Detected — index percentages are independent masks."
+                          : "Not detected in the combined percentage check."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {combinedLandResult.ai_insight && (
+                  <div className="mt-3 rounded-xl border border-blue-400/20 bg-blue-400/[0.05] p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[10px] uppercase tracking-wider text-blue-300">
+                        AI Land Insight
+                      </p>
+                      <span className="text-[10px] text-gray-500">
+                        {combinedLandResult.ai_insight.mode === "live"
+                          ? "LIVE MODEL"
+                          : "DEMO FALLBACK"}
+                      </span>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-200">
+                      {combinedLandResult.ai_insight.insight}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isCombinedLandAnalyzing && (
+              <div className="mt-5 rounded-xl border border-violet-400/20 bg-violet-400/[0.05] p-3 text-xs text-violet-300">
+                Combining NDVI + NDWI + NDBI and generating AI land insight...
+              </div>
+            )}
+
+            {combinedLandError && (
+              <div className="mt-4 rounded-xl border border-yellow-400/20 bg-yellow-400/[0.06] p-3 text-xs leading-5 text-yellow-300">
+                Combined Land Intelligence: {combinedLandError}
+              </div>
+            )}
+
+            {/* =================================================
                 AI ANSWER
                 ================================================= */}
 
@@ -1386,7 +2468,38 @@ Use these numerical NDBI values together with the visible satellite image. Do no
             value={dimensions || "—"}
           />
         </div>
+        {renderMultispectralChange()}
+
       </main>
+    </div>
+  );
+}
+
+// =========================================================
+// PHASE 8A TEMPORAL INPUT
+// =========================================================
+
+function TemporalInput({
+  label,
+  type = "text",
+  min,
+  max,
+  value,
+  onChange,
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-xs uppercase tracking-wider text-gray-500">
+        {label}
+      </label>
+      <input
+        type={type}
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-500/50"
+      />
     </div>
   );
 }

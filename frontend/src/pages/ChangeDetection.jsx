@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { analyzeNDVI, analyzeNDWI, analyzeNDBI } from "../services/ai";
+
+const API_BASE = "https://satquery-ai-backend-r165.onrender.com";
 
 const DEMO_PAIR = {
   before: {
@@ -44,6 +47,22 @@ const [isAiInterpreting, setIsAiInterpreting] = useState(false);
 const [aiInterpretation, setAiInterpretation] = useState(null);
 
 const [aiError, setAiError] = useState("");
+
+/* =========================================================
+   PHASE 7 — MULTISPECTRAL CHANGE STATE
+========================================================= */
+
+const [multispectralChangeResult, setMultispectralChangeResult] =
+  useState(null);
+
+const [isMultispectralChangeAnalyzing, setIsMultispectralChangeAnalyzing] =
+  useState(false);
+
+const [multispectralAiInsight, setMultispectralAiInsight] =
+  useState(null);
+
+const [multispectralChangeError, setMultispectralChangeError] =
+  useState("");
 
 const canvasRef = useRef(null);
 // =========================================================
@@ -197,6 +216,9 @@ useEffect(() => {
       setResult(null);
       setAiInterpretation(null);
       setAiError("");
+      setMultispectralChangeResult(null);
+      setMultispectralAiInsight(null);
+      setMultispectralChangeError("");
     }
 
     if (type === "after") {
@@ -210,6 +232,9 @@ useEffect(() => {
       setResult(null);
       setAiInterpretation(null);
       setAiError("");
+      setMultispectralChangeResult(null);
+      setMultispectralAiInsight(null);
+      setMultispectralChangeError("");
     }
 
     event.target.value = "";
@@ -224,6 +249,9 @@ useEffect(() => {
       setResult(null);
       setAiInterpretation(null);
       setAiError("");
+      setMultispectralChangeResult(null);
+      setMultispectralAiInsight(null);
+      setMultispectralChangeError("");
 
       const [beforeResponse, afterResponse] = await Promise.all([
         fetch(DEMO_PAIR.before.path),
@@ -299,6 +327,9 @@ useEffect(() => {
       setResult(null);
       setAiInterpretation(null);
       setAiError("");
+      setMultispectralChangeResult(null);
+      setMultispectralAiInsight(null);
+      setMultispectralChangeError("");
     }
 
     if (type === "after") {
@@ -312,6 +343,140 @@ useEffect(() => {
       setResult(null);
       setAiInterpretation(null);
       setAiError("");
+      setMultispectralChangeResult(null);
+      setMultispectralAiInsight(null);
+      setMultispectralChangeError("");
+    }
+  };
+
+  // =========================================================
+  // PHASE 7 — MULTISPECTRAL CHANGE DETECTION
+  // =========================================================
+
+  const analyzeMultispectralChange = async () => {
+    if (!beforeScene || !afterScene) {
+      return false;
+    }
+
+    const beforeSceneData = beforeScene.scene || beforeScene;
+    const afterSceneData = afterScene.scene || afterScene;
+    const beforeBounds = beforeScene.areaBounds || null;
+    const afterBounds = afterScene.areaBounds || null;
+
+    if (!beforeBounds || !afterBounds) {
+      throw new Error(
+        "Phase 7 requires the same AOI bounds for both Sentinel-2 scenes."
+      );
+    }
+
+    if (JSON.stringify(beforeBounds) !== JSON.stringify(afterBounds)) {
+      throw new Error(
+        "Before and After scenes use different AOIs. Select both scenes from the same area before running multispectral change detection."
+      );
+    }
+
+    setIsMultispectralChangeAnalyzing(true);
+    setMultispectralChangeError("");
+    setMultispectralChangeResult(null);
+    setMultispectralAiInsight(null);
+
+    try {
+      // Run all three spectral analyses for the exact same AOI.
+      const [beforeNdvi, afterNdvi, beforeNdwi, afterNdwi, beforeNdbi, afterNdbi] =
+        await Promise.all([
+          analyzeNDVI({ scene: beforeSceneData, areaBounds: beforeBounds }),
+          analyzeNDVI({ scene: afterSceneData, areaBounds: afterBounds }),
+          analyzeNDWI({ scene: beforeSceneData, areaBounds: beforeBounds }),
+          analyzeNDWI({ scene: afterSceneData, areaBounds: afterBounds }),
+          analyzeNDBI({ scene: beforeSceneData, areaBounds: beforeBounds }),
+          analyzeNDBI({ scene: afterSceneData, areaBounds: afterBounds }),
+        ]);
+
+      const getNumber = (...values) => {
+        for (const value of values) {
+          const number = Number(value);
+          if (Number.isFinite(number)) return number;
+        }
+        return null;
+      };
+
+      const getStats = (data) => data?.stats || data?.statistics || {};
+
+      const bNv = getStats(beforeNdvi);
+      const aNv = getStats(afterNdvi);
+      const bNw = getStats(beforeNdwi);
+      const aNw = getStats(afterNdwi);
+      const bNb = getStats(beforeNdbi);
+      const aNb = getStats(afterNdbi);
+
+      const metricValues = {
+        before_mean_ndvi: getNumber(bNv.mean, beforeNdvi?.mean_ndvi, beforeNdvi?.mean),
+        after_mean_ndvi: getNumber(aNv.mean, afterNdvi?.mean_ndvi, afterNdvi?.mean),
+        before_vegetation_percentage: getNumber(bNv.vegetation_percentage, beforeNdvi?.vegetation_percentage, beforeNdvi?.vegetation_percent),
+        after_vegetation_percentage: getNumber(aNv.vegetation_percentage, afterNdvi?.vegetation_percentage, afterNdvi?.vegetation_percent),
+        before_mean_ndwi: getNumber(bNw.mean, beforeNdwi?.mean_ndwi, beforeNdwi?.mean),
+        after_mean_ndwi: getNumber(aNw.mean, afterNdwi?.mean_ndwi, afterNdwi?.mean),
+        before_water_percentage: getNumber(bNw.water_percentage, beforeNdwi?.water_percentage, beforeNdwi?.water_percent),
+        after_water_percentage: getNumber(aNw.water_percentage, afterNdwi?.water_percentage, afterNdwi?.water_percent),
+        before_mean_ndbi: getNumber(bNb.mean, beforeNdbi?.mean_ndbi, beforeNdbi?.mean),
+        after_mean_ndbi: getNumber(aNb.mean, afterNdbi?.mean_ndbi, afterNdbi?.mean),
+        before_builtup_percentage: getNumber(bNb.builtup_percentage, beforeNdbi?.builtup_percentage, beforeNdbi?.builtup_percent),
+        after_builtup_percentage: getNumber(aNb.builtup_percentage, afterNdbi?.builtup_percentage, afterNdbi?.builtup_percent),
+      };
+
+      const missing = Object.entries(metricValues)
+        .filter(([, value]) => value === null)
+        .map(([key]) => key);
+
+      if (missing.length) {
+        throw new Error(
+          `Multispectral comparison needs valid before/after NDVI, NDWI and NDBI statistics. Missing: ${missing.join(", ")}`
+        );
+      }
+
+      const form = new FormData();
+      Object.entries(metricValues).forEach(([key, value]) => {
+        form.append(key, String(value));
+      });
+
+      const response = await fetch(`${API_BASE}/api/multispectral-change-detection`, {
+        method: "POST",
+        body: form,
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Multispectral change detection failed.");
+      }
+
+      setMultispectralChangeResult(data);
+
+      const aiForm = new FormData();
+      Object.entries(metricValues).forEach(([key, value]) => {
+        aiForm.append(key, String(value));
+      });
+      aiForm.append("change_summary", data?.interpretation?.summary || "");
+
+      const aiResponse = await fetch(`${API_BASE}/api/multispectral-change-ai-insight`, {
+        method: "POST",
+        body: aiForm,
+      });
+
+      const aiData = await aiResponse.json();
+      if (!aiResponse.ok || !aiData?.success) {
+        throw new Error(aiData?.error || "Multispectral AI insight failed.");
+      }
+
+      setMultispectralAiInsight(aiData);
+      return true;
+    } catch (error) {
+      console.error("MULTISPECTRAL CHANGE ERROR:", error);
+      setMultispectralChangeError(
+        error?.message || "Unable to calculate multispectral change."
+      );
+      return false;
+    } finally {
+      setIsMultispectralChangeAnalyzing(false);
     }
   };
 
@@ -403,7 +568,16 @@ useEffect(() => {
       changeDetectionSucceeded = true;
 
       // ------------------------------------------------------
-      // 2. AI CHANGE INTERPRETATION
+      // 2. MULTISPECTRAL CHANGE DETECTION (PHASE 7)
+      // ------------------------------------------------------
+      // This runs only when both inputs came from Sentinel-2 scene
+      // selection and both scenes share the exact same AOI.
+      if (beforeScene && afterScene) {
+        await analyzeMultispectralChange();
+      }
+
+      // ------------------------------------------------------
+      // 3. AI CHANGE INTERPRETATION
       // ------------------------------------------------------
 
       setIsAiInterpreting(true);
@@ -513,6 +687,9 @@ useEffect(() => {
     setResult(null);
     setAiInterpretation(null);
     setAiError("");
+    setMultispectralChangeResult(null);
+    setMultispectralAiInsight(null);
+    setMultispectralChangeError("");
   };
 
   // =========================================================
@@ -958,6 +1135,126 @@ useEffect(() => {
           </section>
         )}
 
+        {/* =====================================================
+            PHASE 7 — MULTISPECTRAL CHANGE INTELLIGENCE
+        ====================================================== */}
+        {(multispectralChangeResult || isMultispectralChangeAnalyzing || multispectralChangeError) && (
+          <section className="mt-8 overflow-hidden rounded-3xl border border-cyan-400/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
+            <div className="border-b border-white/10 bg-cyan-500/[0.04] px-6 py-6">
+              <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">
+                    Phase 7 · Multispectral Intelligence
+                  </p>
+                  <h3 className="mt-2 text-2xl font-semibold">
+                    NDVI + NDWI + NDBI Change
+                  </h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
+                    Compares vegetation, water and built-up indicators for the same Sentinel-2 AOI across the two observations.
+                  </p>
+                </div>
+
+                <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-wider ${
+                  isMultispectralChangeAnalyzing
+                    ? "border-yellow-400/20 bg-yellow-400/10 text-yellow-400"
+                    : multispectralAiInsight
+                    ? "border-green-400/20 bg-green-400/10 text-green-400"
+                    : "border-white/10 bg-white/5 text-gray-500"
+                }`}>
+                  {isMultispectralChangeAnalyzing ? "ANALYZING" : multispectralAiInsight ? "LIVE MODEL" : "READY"}
+                </span>
+              </div>
+            </div>
+
+            {isMultispectralChangeAnalyzing ? (
+              <div className="p-6">
+                <div className="rounded-2xl border border-yellow-400/10 bg-yellow-400/[0.04] p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-block animate-spin text-lg">◌</span>
+                    <div>
+                      <p className="text-sm font-medium text-gray-200">
+                        Running multispectral comparison...
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Calculating NDVI, NDWI and NDBI for both observations.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : multispectralChangeError ? (
+              <div className="p-6">
+                <div className="rounded-2xl border border-red-400/20 bg-red-500/[0.05] p-5">
+                  <p className="text-sm text-red-300">{multispectralChangeError}</p>
+                  {!beforeScene || !afterScene ? (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Phase 7 requires Sentinel-2 scenes selected with an AOI. Manual image uploads continue to use the existing visual change detection.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : multispectralChangeResult ? (
+              <div className="p-6">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <MultispectralMetricCard
+                    title="NDVI · Vegetation"
+                    before={multispectralChangeResult.comparison?.ndvi?.before}
+                    after={multispectralChangeResult.comparison?.ndvi?.after}
+                    change={multispectralChangeResult.comparison?.ndvi?.change}
+                    direction={multispectralChangeResult.comparison?.ndvi?.direction}
+                    accent="green"
+                  />
+                  <MultispectralMetricCard
+                    title="NDWI · Water"
+                    before={multispectralChangeResult.comparison?.ndwi?.before}
+                    after={multispectralChangeResult.comparison?.ndwi?.after}
+                    change={multispectralChangeResult.comparison?.ndwi?.change}
+                    direction={multispectralChangeResult.comparison?.ndwi?.direction}
+                    accent="blue"
+                  />
+                  <MultispectralMetricCard
+                    title="NDBI · Built-up"
+                    before={multispectralChangeResult.comparison?.ndbi?.before}
+                    after={multispectralChangeResult.comparison?.ndbi?.after}
+                    change={multispectralChangeResult.comparison?.ndbi?.change}
+                    direction={multispectralChangeResult.comparison?.ndbi?.direction}
+                    accent="purple"
+                  />
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-5">
+                  <p className="text-xs uppercase tracking-[0.25em] text-cyan-400">
+                    Detected Multispectral Changes
+                  </p>
+                  <p className="mt-3 text-sm leading-7 text-gray-300">
+                    {multispectralChangeResult.interpretation?.summary || "No summary available."}
+                  </p>
+                </div>
+
+                {multispectralAiInsight?.insight && (
+                  <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.04] p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-cyan-300">
+                        ✦ AI Multispectral Insight
+                      </p>
+                      <span className="rounded-full border border-green-400/20 bg-green-400/10 px-3 py-1 text-[10px] uppercase tracking-wider text-green-400">
+                        {multispectralAiInsight.mode === "demo" ? "DEMO FALLBACK" : "LIVE MODEL"}
+                      </span>
+                    </div>
+                    <p className="mt-4 whitespace-pre-line text-sm leading-7 text-gray-200">
+                      {multispectralAiInsight.insight}
+                    </p>
+                  </div>
+                )}
+
+                <p className="mt-4 text-xs leading-5 text-gray-600">
+                  Note: NDVI, NDWI and NDBI percentage indicators are independent and may overlap; they are not a mutually exclusive 100% land-cover partition.
+                </p>
+              </div>
+            ) : null}
+          </section>
+        )}
+
         {/* RESET */}
         {(beforeImage || afterImage || result) && (
           <div className="mt-6 flex justify-center">
@@ -976,6 +1273,48 @@ useEffect(() => {
         ref={canvasRef}
         className="hidden"
       />
+    </div>
+  );
+}
+
+// =========================================================
+// MULTISPECTRAL METRIC CARD
+// =========================================================
+
+function MultispectralMetricCard({ title, before, after, change, direction, accent }) {
+  const accents = {
+    green: "border-green-400/20 bg-green-500/[0.04] text-green-400",
+    blue: "border-blue-400/20 bg-blue-500/[0.04] text-blue-400",
+    purple: "border-purple-400/20 bg-purple-500/[0.04] text-purple-400",
+  };
+
+  const cls = accents[accent] || accents.purple;
+  const directionLabel = direction === "increase" ? "↑ Increase" : direction === "decrease" ? "↓ Decrease" : "→ Stable";
+
+  return (
+    <div className={`rounded-2xl border p-5 ${cls}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold">{title}</p>
+        <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] uppercase tracking-wider">
+          {directionLabel}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Before</p>
+          <p className="mt-1 text-lg font-semibold text-gray-200">{Number(before ?? 0).toFixed(4)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">After</p>
+          <p className="mt-1 text-lg font-semibold text-gray-200">{Number(after ?? 0).toFixed(4)}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
+        <p className="text-[10px] uppercase tracking-wider text-gray-500">Change</p>
+        <p className="mt-1 text-sm font-semibold">{Number(change ?? 0).toFixed(4)}</p>
+      </div>
     </div>
   );
 }

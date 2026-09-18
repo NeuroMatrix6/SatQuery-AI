@@ -3504,6 +3504,779 @@ function evaluatePixel(sample) {
             "details": str(exc),
         }
 # ============================================================
+# PHASE 6A + 6B — COMBINED LAND INTELLIGENCE
+# ============================================================
+
+@app.post("/api/combined-land-intelligence")
+async def combined_land_intelligence(
+    mean_ndvi: float = Form(...),
+    vegetation_percentage: float = Form(...),
+    mean_ndwi: float = Form(...),
+    water_percentage: float = Form(...),
+    mean_ndbi: float = Form(...),
+    builtup_percentage: float = Form(...),
+):
+    """
+    Phase 6A + 6B.
+
+    Combines already-calculated NDVI, NDWI and NDBI statistics.
+    This endpoint does NOT recalculate satellite indices.
+
+    6A -> Common combined structure
+    6B -> Land-characteristic classification
+    """
+
+    # --------------------------------------------------------
+    # VALIDATE INDEX VALUES
+    # --------------------------------------------------------
+    if not (-1.0 <= mean_ndvi <= 1.0):
+        return {
+            "success": False,
+            "error": "mean_ndvi must be between -1 and 1.",
+        }
+
+    if not (-1.0 <= mean_ndwi <= 1.0):
+        return {
+            "success": False,
+            "error": "mean_ndwi must be between -1 and 1.",
+        }
+
+    if not (-1.0 <= mean_ndbi <= 1.0):
+        return {
+            "success": False,
+            "error": "mean_ndbi must be between -1 and 1.",
+        }
+
+    # --------------------------------------------------------
+    # VALIDATE PERCENTAGES
+    # --------------------------------------------------------
+    percentages = {
+        "vegetation_percentage": vegetation_percentage,
+        "water_percentage": water_percentage,
+        "builtup_percentage": builtup_percentage,
+    }
+
+    for name, value in percentages.items():
+        if not (0.0 <= value <= 100.0):
+            return {
+                "success": False,
+                "error": f"{name} must be between 0 and 100.",
+            }
+
+    # --------------------------------------------------------
+    # PHASE 6B — LAND CHARACTERISTICS
+    # --------------------------------------------------------
+    land_values = {
+        "Vegetation": vegetation_percentage,
+        "Water": water_percentage,
+        "Built-up": builtup_percentage,
+    }
+
+    sorted_values = sorted(
+        land_values.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    dominant_type = sorted_values[0][0]
+    dominant_percentage = float(sorted_values[0][1])
+    second_highest = float(sorted_values[1][1])
+
+    # If the two largest characteristics are close,
+    # classify the area as mixed rather than forcing a dominant class.
+    if dominant_percentage - second_highest < 10.0:
+        land_characteristic = "Mixed Land Characteristics"
+    else:
+        land_characteristic = f"{dominant_type} Dominant"
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
+    return {
+        "success": True,
+        "module": "Combined Land Intelligence",
+        "phase": "6A + 6B",
+        "indices": {
+            "ndvi": {
+                "mean": round(float(mean_ndvi), 4),
+                "vegetation_percentage": round(
+                    float(vegetation_percentage), 2
+                ),
+            },
+            "ndwi": {
+                "mean": round(float(mean_ndwi), 4),
+                "water_percentage": round(
+                    float(water_percentage), 2
+                ),
+            },
+            "ndbi": {
+                "mean": round(float(mean_ndbi), 4),
+                "builtup_percentage": round(
+                    float(builtup_percentage), 2
+                ),
+            },
+        },
+        "summary": {
+            "vegetation_percentage": round(
+                float(vegetation_percentage), 2
+            ),
+            "water_percentage": round(
+                float(water_percentage), 2
+            ),
+            "builtup_percentage": round(
+                float(builtup_percentage), 2
+            ),
+        },
+        "land_characteristics": {
+            "dominant_type": dominant_type,
+            "dominant_percentage": round(
+                dominant_percentage, 2
+            ),
+            "classification": land_characteristic,
+            "composition": {
+                "vegetation": round(
+                    float(vegetation_percentage), 2
+                ),
+                "water": round(
+                    float(water_percentage), 2
+                ),
+                "builtup": round(
+                    float(builtup_percentage), 2
+                ),
+            },
+        },
+        "status": "integrated",
+    }
+
+# ============================================================
+
+# ============================================================
+# PHASE 7 — MULTISPECTRAL CHANGE DETECTION
+# ============================================================
+
+def _safe_float(value, name):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a valid number.")
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite.")
+    return value
+
+
+def _change_direction(delta, tolerance=0.02):
+    if delta > tolerance:
+        return "increase"
+    if delta < -tolerance:
+        return "decrease"
+    return "stable"
+
+
+@app.post("/api/multispectral-change-detection")
+async def multispectral_change_detection(
+    before_mean_ndvi: float = Form(...),
+    after_mean_ndvi: float = Form(...),
+    before_vegetation_percentage: float = Form(...),
+    after_vegetation_percentage: float = Form(...),
+
+    before_mean_ndwi: float = Form(...),
+    after_mean_ndwi: float = Form(...),
+    before_water_percentage: float = Form(...),
+    after_water_percentage: float = Form(...),
+
+    before_mean_ndbi: float = Form(...),
+    after_mean_ndbi: float = Form(...),
+    before_builtup_percentage: float = Form(...),
+    after_builtup_percentage: float = Form(...),
+):
+    """
+    Phase 7:
+    Compare independently calculated Sentinel-2 NDVI, NDWI and NDBI
+    statistics for the same AOI at two different times.
+
+    The percentages are treated as category indicators from each
+    independent index. They are NOT forced into a mutually-exclusive
+    100% land-cover partition.
+    """
+    try:
+        values = {
+            "before_mean_ndvi": _safe_float(before_mean_ndvi, "before_mean_ndvi"),
+            "after_mean_ndvi": _safe_float(after_mean_ndvi, "after_mean_ndvi"),
+            "before_vegetation_percentage": _safe_float(
+                before_vegetation_percentage, "before_vegetation_percentage"
+            ),
+            "after_vegetation_percentage": _safe_float(
+                after_vegetation_percentage, "after_vegetation_percentage"
+            ),
+            "before_mean_ndwi": _safe_float(before_mean_ndwi, "before_mean_ndwi"),
+            "after_mean_ndwi": _safe_float(after_mean_ndwi, "after_mean_ndwi"),
+            "before_water_percentage": _safe_float(
+                before_water_percentage, "before_water_percentage"
+            ),
+            "after_water_percentage": _safe_float(
+                after_water_percentage, "after_water_percentage"
+            ),
+            "before_mean_ndbi": _safe_float(before_mean_ndbi, "before_mean_ndbi"),
+            "after_mean_ndbi": _safe_float(after_mean_ndbi, "after_mean_ndbi"),
+            "before_builtup_percentage": _safe_float(
+                before_builtup_percentage, "before_builtup_percentage"
+            ),
+            "after_builtup_percentage": _safe_float(
+                after_builtup_percentage, "after_builtup_percentage"
+            ),
+        }
+
+        # Index values must remain within their scientific range.
+        for key in (
+            "before_mean_ndvi", "after_mean_ndvi",
+            "before_mean_ndwi", "after_mean_ndwi",
+            "before_mean_ndbi", "after_mean_ndbi",
+        ):
+            if not -1 <= values[key] <= 1:
+                return {
+                    "success": False,
+                    "error": f"{key} must be between -1 and 1."
+                }
+
+        # Percentage indicators are bounded independently.
+        for key in (
+            "before_vegetation_percentage",
+            "after_vegetation_percentage",
+            "before_water_percentage",
+            "after_water_percentage",
+            "before_builtup_percentage",
+            "after_builtup_percentage",
+        ):
+            if not 0 <= values[key] <= 100:
+                return {
+                    "success": False,
+                    "error": f"{key} must be between 0 and 100."
+                }
+
+        def metric(before, after):
+            delta = after - before
+            return {
+                "before": round(before, 4),
+                "after": round(after, 4),
+                "change": round(delta, 4),
+                "direction": _change_direction(delta),
+            }
+
+        def percentage_metric(before, after):
+            delta = after - before
+            return {
+                "before_percentage": round(before, 2),
+                "after_percentage": round(after, 2),
+                "change_percentage_points": round(delta, 2),
+                "direction": _change_direction(delta, tolerance=1.0),
+            }
+
+        ndvi_change = metric(
+            values["before_mean_ndvi"],
+            values["after_mean_ndvi"],
+        )
+        vegetation_change = percentage_metric(
+            values["before_vegetation_percentage"],
+            values["after_vegetation_percentage"],
+        )
+
+        ndwi_change = metric(
+            values["before_mean_ndwi"],
+            values["after_mean_ndwi"],
+        )
+        water_change = percentage_metric(
+            values["before_water_percentage"],
+            values["after_water_percentage"],
+        )
+
+        ndbi_change = metric(
+            values["before_mean_ndbi"],
+            values["after_mean_ndbi"],
+        )
+        builtup_change = percentage_metric(
+            values["before_builtup_percentage"],
+            values["after_builtup_percentage"],
+        )
+
+        # Human-readable category interpretation based on the measured
+        # percentage indicators and index direction.
+        category_changes = []
+
+        if vegetation_change["direction"] == "increase":
+            category_changes.append("Vegetation gain")
+        elif vegetation_change["direction"] == "decrease":
+            category_changes.append("Vegetation loss")
+
+        if water_change["direction"] == "increase":
+            category_changes.append("Water increase")
+        elif water_change["direction"] == "decrease":
+            category_changes.append("Water decrease")
+
+        if builtup_change["direction"] == "increase":
+            category_changes.append("Built-up expansion")
+        elif builtup_change["direction"] == "decrease":
+            category_changes.append("Built-up reduction")
+
+        if not category_changes:
+            category_changes.append("No major category-level change")
+
+        return {
+            "success": True,
+            "module": "Multispectral Change Detection",
+            "phase": "7",
+            "comparison": {
+                "ndvi": ndvi_change,
+                "vegetation": vegetation_change,
+                "ndwi": ndwi_change,
+                "water": water_change,
+                "ndbi": ndbi_change,
+                "builtup": builtup_change,
+            },
+            "interpretation": {
+                "changes_detected": category_changes,
+                "summary": ", ".join(category_changes),
+            },
+            "note": (
+                "NDVI, NDWI and NDBI percentage indicators are calculated "
+                "independently and may overlap; they are not a mutually "
+                "exclusive 100% land-cover partition."
+            ),
+        }
+
+    except ValueError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+    except Exception as exc:
+        print("MULTISPECTRAL CHANGE ERROR:", str(exc))
+        return {
+            "success": False,
+            "error": "Unexpected multispectral change-detection error.",
+            "details": str(exc),
+        }
+
+
+@app.post("/api/multispectral-change-ai-insight")
+async def multispectral_change_ai_insight(
+    before_mean_ndvi: float = Form(...),
+    after_mean_ndvi: float = Form(...),
+    before_vegetation_percentage: float = Form(...),
+    after_vegetation_percentage: float = Form(...),
+
+    before_mean_ndwi: float = Form(...),
+    after_mean_ndwi: float = Form(...),
+    before_water_percentage: float = Form(...),
+    after_water_percentage: float = Form(...),
+
+    before_mean_ndbi: float = Form(...),
+    after_mean_ndbi: float = Form(...),
+    before_builtup_percentage: float = Form(...),
+    after_builtup_percentage: float = Form(...),
+
+    change_summary: str = Form(""),
+):
+    """
+    Phase 7 AI interpretation:
+    provide the measured before/after multispectral evidence to the
+    existing Hugging Face model and return a concise explanation.
+    """
+    try:
+        numeric_fields = {
+            "before_mean_ndvi": before_mean_ndvi,
+            "after_mean_ndvi": after_mean_ndvi,
+            "before_vegetation_percentage": before_vegetation_percentage,
+            "after_vegetation_percentage": after_vegetation_percentage,
+            "before_mean_ndwi": before_mean_ndwi,
+            "after_mean_ndwi": after_mean_ndwi,
+            "before_water_percentage": before_water_percentage,
+            "after_water_percentage": after_water_percentage,
+            "before_mean_ndbi": before_mean_ndbi,
+            "after_mean_ndbi": after_mean_ndbi,
+            "before_builtup_percentage": before_builtup_percentage,
+            "after_builtup_percentage": after_builtup_percentage,
+        }
+
+        for key, value in numeric_fields.items():
+            numeric_fields[key] = _safe_float(value, key)
+
+        for key in (
+            "before_mean_ndvi", "after_mean_ndvi",
+            "before_mean_ndwi", "after_mean_ndwi",
+            "before_mean_ndbi", "after_mean_ndbi",
+        ):
+            if not -1 <= numeric_fields[key] <= 1:
+                return {
+                    "success": False,
+                    "error": f"{key} must be between -1 and 1."
+                }
+
+        for key in (
+            "before_vegetation_percentage",
+            "after_vegetation_percentage",
+            "before_water_percentage",
+            "after_water_percentage",
+            "before_builtup_percentage",
+            "after_builtup_percentage",
+        ):
+            if not 0 <= numeric_fields[key] <= 100:
+                return {
+                    "success": False,
+                    "error": f"{key} must be between 0 and 100."
+                }
+
+        summary = (change_summary or "").strip()
+
+        prompt = f"""
+You are the satellite-analysis intelligence layer of SatQuery-AI.
+
+Interpret ONLY the measured multispectral evidence below.
+
+BEFORE:
+NDVI mean: {numeric_fields["before_mean_ndvi"]:.4f}
+Vegetation indicator: {numeric_fields["before_vegetation_percentage"]:.2f}%
+NDWI mean: {numeric_fields["before_mean_ndwi"]:.4f}
+Water indicator: {numeric_fields["before_water_percentage"]:.2f}%
+NDBI mean: {numeric_fields["before_mean_ndbi"]:.4f}
+Built-up indicator: {numeric_fields["before_builtup_percentage"]:.2f}%
+
+AFTER:
+NDVI mean: {numeric_fields["after_mean_ndvi"]:.4f}
+Vegetation indicator: {numeric_fields["after_vegetation_percentage"]:.2f}%
+NDWI mean: {numeric_fields["after_mean_ndwi"]:.4f}
+Water indicator: {numeric_fields["after_water_percentage"]:.2f}%
+NDBI mean: {numeric_fields["after_mean_ndbi"]:.4f}
+Built-up indicator: {numeric_fields["after_builtup_percentage"]:.2f}%
+
+Computed change summary:
+{summary or "Not supplied"}
+
+Rules:
+- Do not invent a location, cause, date, object, or event.
+- Treat the percentage indicators as independent threshold-based measurements.
+- Do not claim they form a mutually exclusive 100% land-cover composition.
+- Distinguish measured change from possible interpretation.
+- Keep the response concise and evidence-based.
+
+Return exactly these sections:
+Overall Change
+Vegetation
+Water
+Built-up
+Short Conclusion
+"""
+
+        if not HF_TOKEN:
+            insight = (
+                f"Overall Change: {summary or 'Multispectral comparison completed.'}\n"
+                f"Vegetation: NDVI {numeric_fields['before_mean_ndvi']:.4f} → "
+                f"{numeric_fields['after_mean_ndvi']:.4f}; vegetation indicator "
+                f"{numeric_fields['before_vegetation_percentage']:.2f}% → "
+                f"{numeric_fields['after_vegetation_percentage']:.2f}%.\n"
+                f"Water: NDWI {numeric_fields['before_mean_ndwi']:.4f} → "
+                f"{numeric_fields['after_mean_ndwi']:.4f}; water indicator "
+                f"{numeric_fields['before_water_percentage']:.2f}% → "
+                f"{numeric_fields['after_water_percentage']:.2f}%.\n"
+                f"Built-up: NDBI {numeric_fields['before_mean_ndbi']:.4f} → "
+                f"{numeric_fields['after_mean_ndbi']:.4f}; built-up indicator "
+                f"{numeric_fields['before_builtup_percentage']:.2f}% → "
+                f"{numeric_fields['after_builtup_percentage']:.2f}%.\n"
+                "Short Conclusion: Review the measured index changes together; "
+                "the percentages are independent indicators."
+            )
+            return {
+                "success": True,
+                "mode": "demo",
+                "provider": "fallback",
+                "module": "Multispectral Change AI Insight",
+                "phase": "7",
+                "insight": insight,
+            }
+
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "model": HF_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            "max_tokens": 700,
+        }
+
+        response = requests.post(
+            HF_URL,
+            headers=headers,
+            json=payload,
+            timeout=120,
+        )
+
+        if response.status_code != 200:
+            try:
+                details = response.json()
+            except Exception:
+                details = response.text[:1500]
+
+            return {
+                "success": False,
+                "error": f"AI provider request failed: {response.status_code}",
+                "details": details,
+            }
+
+        data = response.json()
+        choices = data.get("choices") or []
+
+        if not choices:
+            return {
+                "success": False,
+                "error": "AI provider returned no choices.",
+            }
+
+        message = choices[0].get("message") or {}
+        insight = (
+            message.get("content")
+            or message.get("reasoning_content")
+            or ""
+        ).strip()
+
+        if not insight:
+            return {
+                "success": False,
+                "error": "AI provider returned an empty insight.",
+            }
+
+        return {
+            "success": True,
+            "mode": "live",
+            "provider": "Hugging Face",
+            "model": HF_MODEL,
+            "module": "Multispectral Change AI Insight",
+            "phase": "7",
+            "insight": insight,
+        }
+
+    except ValueError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+    except requests.RequestException as exc:
+        return {
+            "success": False,
+            "error": "Unable to connect to the AI provider.",
+            "details": str(exc),
+        }
+    except Exception as exc:
+        print("MULTISPECTRAL AI ERROR:", str(exc))
+        return {
+            "success": False,
+            "error": "Unexpected multispectral AI error.",
+            "details": str(exc),
+        }
+
+# ============================================================
+# PHASE 8A — MULTI-TEMPORAL SENTINEL-2 SCENE RETRIEVAL
+# ============================================================
+
+@app.post("/api/multi-temporal-scenes")
+async def multi_temporal_scenes(
+    west: float = Form(...),
+    south: float = Form(...),
+    east: float = Form(...),
+    north: float = Form(...),
+    start_year: int = Form(...),
+    end_year: int = Form(...),
+    target_month: int = Form(1),
+    target_day: int = Form(1),
+    window_days: int = Form(30),
+    max_cloud_cover: float = Form(30),
+):
+    """Retrieve one representative Sentinel-2 L2A scene per year for the same AOI."""
+    global CDSE_ACCESS_TOKEN, CDSE_TOKEN_EXPIRES_AT
+    from datetime import date, datetime, timedelta
+
+    try:
+        west, south, east, north = map(float, (west, south, east, north))
+        start_year, end_year = int(start_year), int(end_year)
+        target_month, target_day = int(target_month), int(target_day)
+        window_days = int(window_days)
+        max_cloud_cover = float(max_cloud_cover)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "Invalid multi-temporal parameters."}
+
+    if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
+        return {"success": False, "error": "Coordinates are outside valid WGS84 limits."}
+    if west >= east:
+        return {"success": False, "error": "West must be less than East."}
+    if south >= north:
+        return {"success": False, "error": "South must be less than North."}
+    if start_year < 2015 or end_year < 2015:
+        return {"success": False, "error": "Year must be 2015 or later for Sentinel-2 analysis."}
+    if start_year > end_year:
+        return {"success": False, "error": "Start year cannot be later than end year."}
+    if end_year - start_year > 10:
+        return {"success": False, "error": "Maximum temporal range is 10 years."}
+    if not 1 <= target_month <= 12 or not 1 <= target_day <= 31:
+        return {"success": False, "error": "Target month/day is invalid."}
+    if not 0 <= window_days <= 180:
+        return {"success": False, "error": "Window must be between 0 and 180 days."}
+    if not 0 <= max_cloud_cover <= 100:
+        return {"success": False, "error": "Cloud cover must be between 0 and 100."}
+    try:
+        date(2020, target_month, target_day)
+    except ValueError:
+        return {"success": False, "error": "Invalid target month/day combination."}
+
+    try:
+        access_token = get_cdse_access_token()
+    except Exception as exc:
+        return {"success": False, "error": "Unable to authenticate with Copernicus Data Space.", "details": str(exc)}
+
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json", "Accept": "application/json"}
+    scenes_by_year = []
+    missing_years = []
+
+    for year in range(start_year, end_year + 1):
+        center = date(year, target_month, min(target_day, 28) if target_month == 2 and target_day == 29 else target_day)
+        year_start = max(date(year, 1, 1), center - timedelta(days=window_days))
+        year_end = min(date(year, 12, 31), center + timedelta(days=window_days))
+        # Use the Query extension for cloud cover instead of relying on
+        # free-form CQL2 text. CDSE documents this POST form explicitly.
+        # We also keep a no-filter fallback if the filtered query returns no
+        # items, so a valid AOI is not reported as a false "no scenes" case.
+        payload = {
+            "collections": ["sentinel-2-l2a"],
+            "datetime": f"{year_start.isoformat()}T00:00:00Z/{year_end.isoformat()}T23:59:59Z",
+            "bbox": [west, south, east, north],
+            "limit": 100,
+        }
+        if max_cloud_cover < 100:
+            payload["query"] = {
+                "eo:cloud_cover": {"lte": max_cloud_cover}
+            }
+
+        try:
+            response = requests.post(CDSE_CATALOG_URL, headers=headers, json=payload, timeout=60)
+            if response.status_code == 401:
+                CDSE_ACCESS_TOKEN = None
+                CDSE_TOKEN_EXPIRES_AT = 0
+                access_token = get_cdse_access_token()
+                headers["Authorization"] = f"Bearer {access_token}"
+                response = requests.post(CDSE_CATALOG_URL, headers=headers, json=payload, timeout=60)
+
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                print("MULTI-TEMPORAL CATALOG ERROR:", year, response.status_code, error_text)
+                missing_years.append(year)
+                continue
+
+            body = response.json()
+            features = body.get("features") or []
+
+            # If cloud filtering produces no result, retry the exact same
+            # AOI/date search without the cloud constraint. This helps us
+            # distinguish "there is no imagery" from an overly restrictive
+            # cloud filter and still lets the frontend show the best scene.
+            if not features and max_cloud_cover < 100:
+                fallback_payload = {
+                    "collections": ["sentinel-2-l2a"],
+                    "datetime": f"{year_start.isoformat()}T00:00:00Z/{year_end.isoformat()}T23:59:59Z",
+                    "bbox": [west, south, east, north],
+                    "limit": 100,
+                }
+                fallback_response = requests.post(
+                    CDSE_CATALOG_URL,
+                    headers=headers,
+                    json=fallback_payload,
+                    timeout=60,
+                )
+                if fallback_response.status_code == 200:
+                    fallback_body = fallback_response.json()
+                    features = fallback_body.get("features") or []
+                    if features:
+                        # The scene selection below still respects the user's
+                        # cloud threshold by filtering candidates explicitly.
+                        filtered_features = []
+                        for feature in features:
+                            try:
+                                cloud_value = float(
+                                    feature.get("properties", {}).get("eo:cloud_cover")
+                                )
+                                if cloud_value <= max_cloud_cover:
+                                    filtered_features.append(feature)
+                            except (TypeError, ValueError):
+                                continue
+                        features = filtered_features
+
+        except Exception as exc:
+            print("MULTI-TEMPORAL SEARCH ERROR:", year, str(exc))
+            missing_years.append(year)
+            continue
+
+        candidates = []
+        for item in features:
+            try:
+                scene = format_satellite_scene(item)
+                acquisition = scene.get("acquisition_date") or ""
+                try:
+                    acq_date = datetime.fromisoformat(acquisition.replace("Z", "+00:00")).date()
+                    day_distance = abs((acq_date - center).days)
+                except Exception:
+                    day_distance = 999999
+                try:
+                    cloud = float(scene.get("cloud_cover"))
+                except (TypeError, ValueError):
+                    cloud = 999.0
+                candidates.append((cloud, day_distance, acquisition, scene))
+            except Exception as exc:
+                print("MULTI-TEMPORAL SCENE FORMAT ERROR:", str(exc))
+
+        if not candidates:
+            missing_years.append(year)
+            continue
+
+        # Lowest cloud cover first; closest to target date breaks ties.
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]), reverse=False)
+        selected = candidates[0][3]
+        selected["analysis_year"] = year
+        selected["target_date"] = center.isoformat()
+        selected["search_start"] = year_start.isoformat()
+        selected["search_end"] = year_end.isoformat()
+        scenes_by_year.append(selected)
+
+    scenes_by_year.sort(key=lambda s: s["analysis_year"])
+    return {
+        "success": True,
+        "module": "Multi-Temporal Scene Retrieval",
+        "phase": "8A",
+        "collection": "sentinel-2-l2a",
+        "requested_years": list(range(start_year, end_year + 1)),
+        "retrieved_years": [s["analysis_year"] for s in scenes_by_year],
+        "missing_years": missing_years,
+        "count": len(scenes_by_year),
+        "same_aoi": True,
+        "query": {
+            "bbox": [west, south, east, north],
+            "start_year": start_year,
+            "end_year": end_year,
+            "target_month": target_month,
+            "target_day": target_day,
+            "window_days": window_days,
+            "max_cloud_cover": max_cloud_cover,
+        },
+        "selection_rule": "One scene per year: lowest cloud cover, then closest acquisition date to the target date.",
+        "scenes": scenes_by_year,
+        "note": "Phase 8A retrieves scene metadata only. NDVI, NDWI and NDBI temporal calculations are added in later Phase 8 stages.",
+    }
+
+
+
 # VQA
 # ============================================================
 
@@ -4727,6 +5500,366 @@ Important:
 
 
 # ============================================================
+# PHASE 8B — SAME AOI VALIDATION ACROSS YEARS
+# ============================================================
+
+def _normalise_bbox(value):
+    """Return [west, south, east, north] when a valid bbox is supplied."""
+    try:
+        if not isinstance(value, (list, tuple)) or len(value) < 4:
+            return None
+        west, south, east, north = [float(value[i]) for i in range(4)]
+        if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
+            return None
+        if west >= east or south >= north:
+            return None
+        return [west, south, east, north]
+    except (TypeError, ValueError):
+        return None
+
+
+def _bbox_intersection(a, b):
+    """Return intersection bbox or None."""
+    west = max(a[0], b[0])
+    south = max(a[1], b[1])
+    east = min(a[2], b[2])
+    north = min(a[3], b[3])
+    if west >= east or south >= north:
+        return None
+    return [west, south, east, north]
+
+
+def _bbox_area(b):
+    """Simple degree-space area used only for coverage validation."""
+    return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+
+@app.post("/api/multi-temporal-validate-aoi")
+async def multi_temporal_validate_aoi(
+    west: float = Form(...),
+    south: float = Form(...),
+    east: float = Form(...),
+    north: float = Form(...),
+    scenes_json: str = Form(...),
+):
+    """
+    Validate that every retrieved multi-temporal scene covers the requested AOI.
+
+    This is a spatial/bbox consistency check. It does not claim pixel-level
+    registration or exact geospatial equivalence between different dates.
+    """
+    import json
+
+    try:
+        aoi = _normalise_bbox([west, south, east, north])
+        if not aoi:
+            return {"success": False, "error": "Invalid AOI coordinates."}
+
+        try:
+            scenes = json.loads(scenes_json)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "scenes_json must contain valid JSON."}
+
+        if not isinstance(scenes, list):
+            return {"success": False, "error": "scenes_json must be a JSON array of scenes."}
+
+        validated = []
+        invalid_years = []
+        missing_bbox_years = []
+
+        for index, scene in enumerate(scenes):
+            if not isinstance(scene, dict):
+                invalid_years.append(f"item-{index + 1}")
+                continue
+
+            year = scene.get("analysis_year")
+            try:
+                year_key = int(year)
+            except (TypeError, ValueError):
+                year_key = year if year is not None else f"item-{index + 1}"
+
+            scene_bbox = _normalise_bbox(scene.get("bbox"))
+
+            # Some STAC responses can expose geometry even when bbox is absent.
+            # For Phase 8B we deliberately require the catalogue bbox so that
+            # the validation remains deterministic and does not pretend to do
+            # exact polygon geospatial calculations.
+            if not scene_bbox:
+                missing_bbox_years.append(year_key)
+                validated.append({
+                    "analysis_year": year_key,
+                    "scene_id": scene.get("id"),
+                    "valid": False,
+                    "reason": "Scene bbox is missing or invalid.",
+                    "coverage_percentage": 0.0,
+                })
+                continue
+
+            intersection = _bbox_intersection(aoi, scene_bbox)
+            aoi_area = _bbox_area(aoi)
+            intersection_area = _bbox_area(intersection) if intersection else 0.0
+            coverage = (intersection_area / aoi_area * 100.0) if aoi_area > 0 else 0.0
+
+            # A scene is accepted only when its bbox fully contains the AOI.
+            fully_covers = (
+                scene_bbox[0] <= aoi[0]
+                and scene_bbox[1] <= aoi[1]
+                and scene_bbox[2] >= aoi[2]
+                and scene_bbox[3] >= aoi[3]
+            )
+
+            valid = bool(fully_covers and coverage >= 99.999)
+            reason = (
+                "Scene bbox fully covers the requested AOI."
+                if valid
+                else "Scene bbox does not fully cover the requested AOI."
+            )
+
+            validated.append({
+                "analysis_year": year_key,
+                "scene_id": scene.get("id"),
+                "acquisition_date": scene.get("acquisition_date"),
+                "scene_bbox": scene_bbox,
+                "valid": valid,
+                "fully_covers_aoi": fully_covers,
+                "coverage_percentage": round(min(100.0, coverage), 3),
+                "reason": reason,
+            })
+
+            if not valid:
+                invalid_years.append(year_key)
+
+        validated.sort(key=lambda item: str(item.get("analysis_year")))
+        valid_years = [item["analysis_year"] for item in validated if item.get("valid")]
+        all_valid = bool(scenes) and len(valid_years) == len(scenes) and not invalid_years
+
+        return {
+            "success": True,
+            "module": "Multi-Temporal Same AOI Validation",
+            "phase": "8B",
+            "same_aoi": all_valid,
+            "aoi": aoi,
+            "scene_count": len(scenes),
+            "valid_count": len(valid_years),
+            "invalid_count": len(scenes) - len(valid_years),
+            "valid_years": valid_years,
+            "invalid_years": invalid_years,
+            "missing_bbox_years": missing_bbox_years,
+            "validation_method": "Requested AOI bbox must be fully contained by each Sentinel-2 scene bbox.",
+            "note": "Phase 8B validates spatial AOI coverage only; it is not pixel-level registration or exact geospatial co-registration.",
+            "results": validated,
+        }
+
+
+    except Exception as exc:
+        print("MULTI-TEMPORAL AOI VALIDATION ERROR:", str(exc))
+        return {
+            "success": False,
+            "error": "Unexpected same-AOI validation error.",
+            "details": str(exc),
+        }
+
+# ============================================================
+# PHASE 8C — MULTI-TEMPORAL NDVI
+# ============================================================
+
+@app.post("/api/multi-temporal-ndvi")
+async def multi_temporal_ndvi(
+    west: float = Form(...),
+    south: float = Form(...),
+    east: float = Form(...),
+    north: float = Form(...),
+    scenes_json: str = Form(...),
+):
+    """Calculate year-wise NDVI for the validated same-AOI Sentinel-2 scenes."""
+    global CDSE_ACCESS_TOKEN, CDSE_TOKEN_EXPIRES_AT
+    from datetime import datetime
+
+    try:
+        west, south, east, north = map(float, (west, south, east, north))
+    except (TypeError, ValueError):
+        return {"success": False, "error": "Invalid AOI coordinates."}
+
+    if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
+        return {"success": False, "error": "Coordinates are outside valid WGS84 limits."}
+    if west >= east or south >= north:
+        return {"success": False, "error": "Invalid AOI: west < east and south < north are required."}
+
+    try:
+        scenes = json.loads(scenes_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {"success": False, "error": "scenes_json must contain valid JSON."}
+
+    if not isinstance(scenes, list) or not scenes:
+        return {"success": False, "error": "At least one scene is required."}
+    if len(scenes) > 10:
+        return {"success": False, "error": "Maximum of 10 temporal scenes is supported."}
+
+    try:
+        access_token = get_cdse_access_token()
+    except Exception as exc:
+        return {"success": False, "error": "Unable to authenticate with Copernicus Data Space.", "details": str(exc)}
+
+    evalscript = """
+//VERSION=3
+function setup() {
+  return {
+    input: ["B04", "B08", "SCL"],
+    output: { bands: 1, sampleType: "FLOAT32" }
+  };
+}
+function evaluatePixel(sample) {
+  if (sample.SCL === 3 || sample.SCL === 8 || sample.SCL === 9 || sample.SCL === 10 || sample.SCL === 11) {
+    return [-9999];
+  }
+  var red = sample.B04;
+  var nir = sample.B08;
+  var denominator = nir + red;
+  if (denominator === 0) return [-9999];
+  return [(nir - red) / denominator];
+}
+"""
+
+    results = []
+    failed_years = []
+
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            failed_years.append(None)
+            continue
+
+        year = scene.get("analysis_year")
+        acquisition = str(scene.get("acquisition_date") or "")[:10]
+        if year is None:
+            try:
+                year = int(acquisition[:4])
+            except Exception:
+                year = None
+
+        if not acquisition:
+            failed_years.append(year)
+            continue
+
+        try:
+            datetime.strptime(acquisition, "%Y-%m-%d")
+        except ValueError:
+            failed_years.append(year)
+            continue
+
+        request_body = {
+            "input": {
+                "bounds": {
+                    "bbox": [west, south, east, north],
+                    "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"},
+                },
+                "data": [{
+                    "type": "sentinel-2-l2a",
+                    "dataFilter": {
+                        "timeRange": {
+                            "from": f"{acquisition}T00:00:00Z",
+                            "to": f"{acquisition}T23:59:59Z",
+                        },
+                        "mosaickingOrder": "leastCC",
+                    },
+                }],
+            },
+            "output": {
+                "width": 768,
+                "height": 768,
+                "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}],
+            },
+            "evalscript": evalscript,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "image/tiff",
+        }
+
+        try:
+            response = requests.post(CDSE_PROCESS_URL, headers=headers, json=request_body, timeout=180)
+
+            if response.status_code == 401:
+                CDSE_ACCESS_TOKEN = None
+                CDSE_TOKEN_EXPIRES_AT = 0
+                access_token = get_cdse_access_token()
+                headers["Authorization"] = f"Bearer {access_token}"
+                response = requests.post(CDSE_PROCESS_URL, headers=headers, json=request_body, timeout=180)
+
+            if response.status_code != 200:
+                print("MULTI-TEMPORAL NDVI STATUS:", year, response.status_code)
+                failed_years.append(year)
+                continue
+
+            ndvi_image = Image.open(io.BytesIO(response.content))
+            ndvi_array = np.array(ndvi_image, dtype=np.float32)
+
+            valid_mask = (
+                np.isfinite(ndvi_array)
+                & (ndvi_array > -1.0)
+                & (ndvi_array <= 1.0)
+            )
+            valid_values = ndvi_array[valid_mask]
+
+            if valid_values.size == 0:
+                failed_years.append(year)
+                continue
+
+            mean_ndvi = float(np.mean(valid_values))
+            min_ndvi = float(np.min(valid_values))
+            max_ndvi = float(np.max(valid_values))
+            vegetation_percentage = float(np.mean(valid_values > 0.20) * 100.0)
+
+            if mean_ndvi >= 0.60:
+                health = "Excellent"
+            elif mean_ndvi >= 0.40:
+                health = "Healthy"
+            elif mean_ndvi >= 0.20:
+                health = "Moderate"
+            elif mean_ndvi >= 0.00:
+                health = "Sparse"
+            else:
+                health = "Very Low"
+
+            result = {
+                "analysis_year": int(year) if year is not None else None,
+                "date": acquisition,
+                "mean_ndvi": round(mean_ndvi, 4),
+                "min_ndvi": round(min_ndvi, 4),
+                "max_ndvi": round(max_ndvi, 4),
+                "vegetation_percentage": round(vegetation_percentage, 2),
+                "vegetation_health": health,
+                "valid_pixels": int(valid_values.size),
+            }
+            results.append(result)
+
+        except requests.RequestException as exc:
+            print("MULTI-TEMPORAL NDVI REQUEST ERROR:", year, str(exc))
+            failed_years.append(year)
+        except Exception as exc:
+            print("MULTI-TEMPORAL NDVI ERROR:", year, str(exc))
+            failed_years.append(year)
+
+    results.sort(key=lambda item: (item.get("analysis_year") is None, item.get("analysis_year") or 0))
+
+    return {
+        "success": bool(results),
+        "module": "Multi-Temporal NDVI Analysis",
+        "phase": "8C",
+        "product": "Sentinel-2 L2A",
+        "bands": ["B04", "B08"],
+        "formula": "(B08 - B04) / (B08 + B04)",
+        "vegetation_threshold": 0.20,
+        "same_aoi": True,
+        "requested_scene_count": len(scenes),
+        "processed_scene_count": len(results),
+        "failed_years": failed_years,
+        "results": results,
+        "note": "Year-wise NDVI is calculated using the same requested AOI and the selected Sentinel-2 acquisition date for each scene.",
+    }
+
+# ============================================================
 # RUN SERVER
 # ============================================================
 
@@ -4745,3 +5878,4 @@ if __name__ == "__main__":
         reload=True,
 
     )
+
