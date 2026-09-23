@@ -62,19 +62,23 @@ export default function ImageAnalysis() {
   const [activeScene, setActiveScene] = useState(null);
   const [activeAreaBounds, setActiveAreaBounds] = useState(null);
 
-  // =========================================================
-  // PHASE 8A — MULTI-TEMPORAL SCENE RETRIEVAL
-  // =========================================================
+  // Phase 8A — clean multi-temporal scene retrieval
   const [multiTemporalScenes, setMultiTemporalScenes] = useState([]);
   const [multiTemporalError, setMultiTemporalError] = useState("");
   const [isMultiTemporalLoading, setIsMultiTemporalLoading] = useState(false);
-
   const [multiTemporalStartYear, setMultiTemporalStartYear] = useState("2022");
   const [multiTemporalEndYear, setMultiTemporalEndYear] = useState("2026");
-  const [multiTemporalMonth, setMultiTemporalMonth] = useState("1");
-  const [multiTemporalDay, setMultiTemporalDay] = useState("1");
-  const [multiTemporalWindowDays, setMultiTemporalWindowDays] = useState("30");
-  const [multiTemporalCloudCover, setMultiTemporalCloudCover] = useState("30");
+  const [multiTemporalMonth, setMultiTemporalMonth] = useState("6");
+  const [multiTemporalDay, setMultiTemporalDay] = useState("15");
+  const [multiTemporalWindowDays, setMultiTemporalWindowDays] = useState("180");
+  const [multiTemporalCloudCover, setMultiTemporalCloudCover] = useState("100");
+
+  // Unified Phase 8 temporal analysis — user selects only what is needed
+  const [selectedTemporalIndices, setSelectedTemporalIndices] = useState(["NDVI", "NDWI", "NDBI"]);
+  const [unifiedTemporalResults, setUnifiedTemporalResults] = useState([]);
+  const [unifiedTemporalError, setUnifiedTemporalError] = useState("");
+  const [unifiedTemporalValidation, setUnifiedTemporalValidation] = useState(null);
+  const [isUnifiedTemporalAnalyzing, setIsUnifiedTemporalAnalyzing] = useState(false);
 
   // NDVI
   const [ndviResult, setNdviResult] = useState(null);
@@ -117,6 +121,11 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
     setNdbiResult(null);
     setNdbiError("");
 
+    setUnifiedTemporalResults([]);
+    setUnifiedTemporalError("");
+    setUnifiedTemporalValidation(null);
+    setIsUnifiedTemporalAnalyzing(false);
+
     setCombinedLandResult(null);
     setCombinedLandError("");
       setMultispectralChangeResult(null);
@@ -129,7 +138,7 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
       setActiveAreaBounds(null);
       setMultiTemporalScenes([]);
       setMultiTemporalError("");
-
+      setIsMultiTemporalLoading(false);
       sessionStorage.removeItem("satquery_active_scene");
       sessionStorage.removeItem("satquery_multi_temporal_scenes");
     }
@@ -276,6 +285,246 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
   }, []);
 
   // =========================================================
+  // PHASE 8A — MULTI-YEAR SCENE RETRIEVAL
+  // =========================================================
+
+  const retrieveMultiTemporalScenes = async () => {
+    setMultiTemporalError("");
+    setMultiTemporalScenes([]);
+    setUnifiedTemporalResults([]);
+    setUnifiedTemporalError("");
+    setUnifiedTemporalValidation(null);
+
+    if (!activeAreaBounds || !Array.isArray(activeAreaBounds) || activeAreaBounds.length < 2) {
+      setMultiTemporalError("Select an Analysis Area first.");
+      return;
+    }
+
+    const firstCorner = activeAreaBounds[0];
+    const secondCorner = activeAreaBounds[1];
+
+    const south = Math.min(Number(firstCorner?.[0]), Number(secondCorner?.[0]));
+    const north = Math.max(Number(firstCorner?.[0]), Number(secondCorner?.[0]));
+    const west = Math.min(Number(firstCorner?.[1]), Number(secondCorner?.[1]));
+    const east = Math.max(Number(firstCorner?.[1]), Number(secondCorner?.[1]));
+
+    const startYear = Number(multiTemporalStartYear);
+    const endYear = Number(multiTemporalEndYear);
+    const targetMonth = Number(multiTemporalMonth);
+    const targetDay = Number(multiTemporalDay);
+    const windowDays = Number(multiTemporalWindowDays);
+    const maxCloudCover = Number(multiTemporalCloudCover);
+
+    if (![west, south, east, north].every(Number.isFinite) || west >= east || south >= north) {
+      setMultiTemporalError("The selected AOI coordinates are invalid.");
+      return;
+    }
+
+    if (!Number.isInteger(startYear) || !Number.isInteger(endYear) || startYear < 2015 || endYear < startYear || endYear - startYear > 10) {
+      setMultiTemporalError("Enter a valid year range from 2015 onward (maximum 10 years).");
+      return;
+    }
+
+    if (!Number.isInteger(targetMonth) || targetMonth < 1 || targetMonth > 12) {
+      setMultiTemporalError("Target month must be between 1 and 12.");
+      return;
+    }
+
+    if (!Number.isInteger(targetDay) || targetDay < 1 || targetDay > 31) {
+      setMultiTemporalError("Target day must be between 1 and 31.");
+      return;
+    }
+
+    if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 180) {
+      setMultiTemporalError("Search window must be between 0 and 180 days.");
+      return;
+    }
+
+    if (!Number.isFinite(maxCloudCover) || maxCloudCover < 0 || maxCloudCover > 100) {
+      setMultiTemporalError("Cloud cover must be between 0 and 100%.");
+      return;
+    }
+
+    setIsMultiTemporalLoading(true);
+
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+      const form = new FormData();
+      form.append("west", String(west));
+      form.append("south", String(south));
+      form.append("east", String(east));
+      form.append("north", String(north));
+      form.append("start_year", String(startYear));
+      form.append("end_year", String(endYear));
+      form.append("target_month", String(targetMonth));
+      form.append("target_day", String(targetDay));
+      form.append("window_days", String(windowDays));
+      form.append("max_cloud_cover", String(maxCloudCover));
+
+      const response = await fetch(`${apiBase}/api/multi-temporal-scenes`, {
+        method: "POST",
+        body: form,
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Phase 8A returned an invalid server response.");
+      }
+
+      if (!response.ok || !data?.success) {
+        const details = Array.isArray(data?.errors)
+          ? data.errors.map((item) => `${item?.year ?? "?"}: ${item?.details || item?.status_code || "error"}`).join(" | ")
+          : "";
+        throw new Error(data?.error || details || "Multi-temporal scene retrieval failed.");
+      }
+
+      const scenes = Array.isArray(data.scenes)
+        ? [...data.scenes].sort((a, b) => Number(a?.analysis_year || 0) - Number(b?.analysis_year || 0))
+        : [];
+
+      setMultiTemporalScenes(scenes);
+
+      sessionStorage.setItem(
+        "satquery_multi_temporal_scenes",
+        JSON.stringify({
+          phase: "8A",
+          aoi: [west, south, east, north],
+          query: data.query,
+          scenes,
+          requested_years: data.requested_years || [],
+          retrieved_years: data.retrieved_years || [],
+          missing_years: data.missing_years || [],
+        })
+      );
+
+      if (!scenes.length) {
+        const missing = (data.missing_years || []).join(", ");
+        setMultiTemporalError(
+          missing
+            ? `No Sentinel-2 scene matched the Phase 8A criteria for year(s): ${missing}.`
+            : "No Sentinel-2 scenes matched the Phase 8A search criteria."
+        );
+      }
+    } catch (err) {
+      console.error("PHASE 8A MULTI-TEMPORAL RETRIEVAL ERROR:", err);
+      setMultiTemporalError(err?.message || "Unable to retrieve multi-temporal Sentinel-2 scenes.");
+    } finally {
+      setIsMultiTemporalLoading(false);
+    }
+  };
+
+  // =========================================================
+  // PHASE 8 — UNIFIED NDVI / NDWI / NDBI ANALYSIS
+  // =========================================================
+
+  const analyzeSelectedTemporalIndices = async () => {
+    setUnifiedTemporalError("");
+    setUnifiedTemporalResults([]);
+    setUnifiedTemporalValidation(null);
+
+    if (!multiTemporalScenes.length) {
+      setUnifiedTemporalError("Retrieve the Phase 8A multi-year scenes first.");
+      return;
+    }
+
+    if (!selectedTemporalIndices.length) {
+      setUnifiedTemporalError("Select at least one index to analyze.");
+      return;
+    }
+
+    if (!activeAreaBounds || !Array.isArray(activeAreaBounds) || activeAreaBounds.length < 2) {
+      setUnifiedTemporalError("Select an Analysis Area first.");
+      return;
+    }
+
+    const firstCorner = activeAreaBounds[0];
+    const secondCorner = activeAreaBounds[1];
+    const south = Math.min(Number(firstCorner?.[0]), Number(secondCorner?.[0]));
+    const north = Math.max(Number(firstCorner?.[0]), Number(secondCorner?.[0]));
+    const west = Math.min(Number(firstCorner?.[1]), Number(secondCorner?.[1]));
+    const east = Math.max(Number(firstCorner?.[1]), Number(secondCorner?.[1]));
+
+    if (![west, south, east, north].every(Number.isFinite) || west >= east || south >= north) {
+      setUnifiedTemporalError("The selected AOI coordinates are invalid.");
+      return;
+    }
+
+    setIsUnifiedTemporalAnalyzing(true);
+
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+      const form = new FormData();
+      form.append("west", String(west));
+      form.append("south", String(south));
+      form.append("east", String(east));
+      form.append("north", String(north));
+      form.append("scenes_json", JSON.stringify(multiTemporalScenes));
+      form.append("indices_json", JSON.stringify(selectedTemporalIndices));
+
+      const response = await fetch(`${apiBase}/api/multi-temporal-indices`, {
+        method: "POST",
+        body: form,
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Unified temporal analysis returned an invalid server response.");
+      }
+
+      if (!response.ok || !data?.success) {
+        const invalidYears = data?.aoi_validation?.invalid_years || [];
+        if (invalidYears.length) {
+          throw new Error(`AOI coverage check failed for year(s): ${invalidYears.join(", ")}.`);
+        }
+        const failedDetails = Array.isArray(data?.failed_details)
+          ? data.failed_details
+              .map((item) => `${item?.year ?? "?"}: ${item?.error || "processing error"}`)
+              .join(" | ")
+          : "";
+        throw new Error(data?.error || failedDetails || "Unified multi-temporal analysis failed.");
+      }
+
+      setUnifiedTemporalResults(Array.isArray(data.results) ? data.results : []);
+      setUnifiedTemporalValidation(data.aoi_validation || null);
+
+      sessionStorage.setItem(
+        "satquery_multi_temporal_analysis",
+        JSON.stringify({
+          phase: "8C-8D-8E",
+          selected_indices: selectedTemporalIndices,
+          aoi: [west, south, east, north],
+          results: Array.isArray(data.results) ? data.results : [],
+          aoi_validation: data.aoi_validation || null,
+        })
+      );
+
+      if (!Array.isArray(data.results) || !data.results.length) {
+        throw new Error("No temporal index results were returned.");
+      }
+    } catch (err) {
+      console.error("UNIFIED MULTI-TEMPORAL ANALYSIS ERROR:", err);
+      setUnifiedTemporalError(err?.message || "Unable to analyze the selected temporal indices.");
+    } finally {
+      setIsUnifiedTemporalAnalyzing(false);
+    }
+  };
+
+  const toggleTemporalIndex = (index) => {
+    setSelectedTemporalIndices((current) => {
+      if (current.includes(index)) {
+        return current.filter((item) => item !== index);
+      }
+      return [...current, index].filter((item, position, list) => list.indexOf(item) === position);
+    });
+    setUnifiedTemporalResults([]);
+    setUnifiedTemporalError("");
+  };
+
+  // =========================================================
   // LOAD DEMO IMAGE
   // =========================================================
 
@@ -298,6 +547,10 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
 
       setActiveScene(null);
       setActiveAreaBounds(null);
+      setMultiTemporalScenes([]);
+      setMultiTemporalError("");
+      setIsMultiTemporalLoading(false);
+      sessionStorage.removeItem("satquery_multi_temporal_scenes");
 
       const response = await fetch(DEMO_IMAGE.path);
 
@@ -383,200 +636,8 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
     setActiveAreaBounds(null);
     setMultiTemporalScenes([]);
     setMultiTemporalError("");
+    setIsMultiTemporalLoading(false);
     sessionStorage.removeItem("satquery_multi_temporal_scenes");
-  };
-
-  // =========================================================
-  // COMBINED AI + NDVI + NDWI + NDBI ANALYSIS
-  // =========================================================
-
-  // =========================================================
-  // PHASE 8A — MULTI-TEMPORAL SCENE RETRIEVAL
-  // =========================================================
-
-  const retrieveMultiTemporalScenes = async () => {
-    setMultiTemporalError("");
-
-    if (!activeAreaBounds) {
-      setMultiTemporalError(
-        "Please select an Analysis Area (AOI) in GeoLocation first."
-      );
-      return;
-    }
-
-    const startYear = Number(multiTemporalStartYear);
-    const endYear = Number(multiTemporalEndYear);
-    const targetMonth = Number(multiTemporalMonth);
-    const targetDay = Number(multiTemporalDay);
-    const windowDays = Number(multiTemporalWindowDays);
-    const maxCloudCover = Number(multiTemporalCloudCover);
-
-    if (
-      !Number.isInteger(startYear) ||
-      !Number.isInteger(endYear) ||
-      startYear < 2015 ||
-      endYear < 2015 ||
-      endYear < startYear
-    ) {
-      setMultiTemporalError(
-        "Enter valid years from 2015 onward, with End Year greater than or equal to Start Year."
-      );
-      return;
-    }
-
-    if (endYear - startYear > 10) {
-      setMultiTemporalError("Phase 8A supports a maximum 10-year analysis span.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(targetMonth) ||
-      targetMonth < 1 ||
-      targetMonth > 12
-    ) {
-      setMultiTemporalError("Target month must be between 1 and 12.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(targetDay) ||
-      targetDay < 1 ||
-      targetDay > 31
-    ) {
-      setMultiTemporalError("Target day must be between 1 and 31.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(windowDays) ||
-      windowDays < 0 ||
-      windowDays > 180
-    ) {
-      setMultiTemporalError("Search window must be between 0 and 180 days.");
-      return;
-    }
-
-    if (
-      !Number.isFinite(maxCloudCover) ||
-      maxCloudCover < 0 ||
-      maxCloudCover > 100
-    ) {
-      setMultiTemporalError("Maximum cloud cover must be between 0 and 100%.");
-      return;
-    }
-
-    const firstCorner = activeAreaBounds?.[0];
-    const secondCorner = activeAreaBounds?.[1];
-
-    if (
-      !Array.isArray(firstCorner) ||
-      !Array.isArray(secondCorner) ||
-      firstCorner.length < 2 ||
-      secondCorner.length < 2
-    ) {
-      setMultiTemporalError("The selected AOI bounds are invalid.");
-      return;
-    }
-
-    const south = Math.min(Number(firstCorner[0]), Number(secondCorner[0]));
-    const north = Math.max(Number(firstCorner[0]), Number(secondCorner[0]));
-    const west = Math.min(Number(firstCorner[1]), Number(secondCorner[1]));
-    const east = Math.max(Number(firstCorner[1]), Number(secondCorner[1]));
-
-    if (
-      ![west, south, east, north].every(Number.isFinite) ||
-      west >= east ||
-      south >= north
-    ) {
-      setMultiTemporalError("The selected AOI coordinates are invalid.");
-      return;
-    }
-
-    setIsMultiTemporalLoading(true);
-    setMultiTemporalScenes([]);
-
-    try {
-      const apiBase =
-        import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-
-      const form = new FormData();
-      form.append("west", String(west));
-      form.append("south", String(south));
-      form.append("east", String(east));
-      form.append("north", String(north));
-      form.append("start_year", String(startYear));
-      form.append("end_year", String(endYear));
-      form.append("target_month", String(targetMonth));
-      form.append("target_day", String(targetDay));
-      form.append("window_days", String(windowDays));
-      form.append("max_cloud_cover", String(maxCloudCover));
-
-      const response = await fetch(
-        `${apiBase}/api/multi-temporal-scenes`,
-        {
-          method: "POST",
-          body: form,
-        }
-      );
-
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Phase 8A returned an invalid server response.");
-      }
-
-      if (!response.ok || !data?.success) {
-        throw new Error(
-          data?.error || "Multi-temporal satellite scene retrieval failed."
-        );
-      }
-
-      const scenes = Array.isArray(data.scenes)
-        ? [...data.scenes].sort(
-            (a, b) =>
-              Number(a?.analysis_year || 0) -
-              Number(b?.analysis_year || 0)
-          )
-        : [];
-
-      setMultiTemporalScenes(scenes);
-
-      sessionStorage.setItem(
-        "satquery_multi_temporal_scenes",
-        JSON.stringify({
-          phase: "8A",
-          aoi: [west, south, east, north],
-          query: data.query || {
-            start_year: startYear,
-            end_year: endYear,
-            target_month: targetMonth,
-            target_day: targetDay,
-            window_days: windowDays,
-            max_cloud_cover: maxCloudCover,
-          },
-          scenes,
-          requested_years: data.requested_years || [],
-          retrieved_years: data.retrieved_years || [],
-          missing_years: data.missing_years || [],
-          same_aoi: true,
-        })
-      );
-
-      if (!scenes.length) {
-        setMultiTemporalError(
-          "No Sentinel-2 scenes matched the Phase 8A search criteria."
-        );
-      }
-    } catch (err) {
-      console.error("PHASE 8A MULTI-TEMPORAL RETRIEVAL ERROR:", err);
-      setMultiTemporalError(
-        err?.message ||
-          "Unable to retrieve multi-temporal Sentinel-2 scenes."
-      );
-    } finally {
-      setIsMultiTemporalLoading(false);
-    }
   };
 
   // =========================================================
@@ -679,34 +740,55 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
         ? 0
         : 100 - classifiedTotalPercentage;
 
-      // Phase 6D — AI Land Insight
-      const aiForm = new FormData();
-      aiForm.append("mean_ndvi", String(meanNdvi));
-      aiForm.append("vegetation_percentage", String(vegetationPercentage));
-      aiForm.append("mean_ndwi", String(meanNdwi));
-      aiForm.append("water_percentage", String(waterPercentage));
-      aiForm.append("mean_ndbi", String(meanNdbi));
-      aiForm.append("builtup_percentage", String(builtupPercentage));
-      aiForm.append("dominant_type", dominantType);
-      aiForm.append("dominant_percentage", String(dominantPercentage));
-      aiForm.append("classification", classification);
-      aiForm.append(
-        "classified_total_percentage",
-        String(classifiedTotalPercentage)
-      );
-      aiForm.append("other_percentage", String(otherPercentage));
-      aiForm.append("overlap_detected", String(overlapDetected));
+      // Phase 6D — Deterministic Land Insight
+      // HF inference is intentionally not used here because the
+      // existing NDVI/NDWI/NDBI evidence is already sufficient
+      // for a factual, token-free summary.
+      const vegetationStatus =
+        meanNdvi >= 0.60
+          ? "High vegetation signal"
+          : meanNdvi >= 0.40
+            ? "Moderate vegetation signal"
+            : meanNdvi >= 0.20
+              ? "Low-to-moderate vegetation signal"
+              : "Low vegetation signal";
 
-      const aiResponse = await fetch(
-        `${apiBase}/api/combined-land-ai-insight`,
-        { method: "POST", body: aiForm }
-      );
+      const waterStatus =
+        meanNdwi >= 0.20
+          ? "Higher water-related signal"
+          : meanNdwi >= 0.00
+            ? "Moderate water-related signal"
+            : "Low water-related signal";
 
-      if (!aiResponse.ok) {
-        throw new Error("Combined AI Land Insight request failed.");
-      }
+      const builtupStatus =
+        meanNdbi >= 0.20
+          ? "Higher built-up signal"
+          : meanNdbi >= 0.00
+            ? "Moderate built-up signal"
+            : "Low built-up signal";
 
-      const aiData = await aiResponse.json();
+      const deterministicInsight = {
+        success: true,
+        mode: "deterministic",
+        provider: "local-evidence",
+        module: "Combined Land Insight",
+        phase: "6D",
+        insight:
+          `Overall Land Condition: ${classification}. ` +
+          `The dominant measured indicator is ${dominantType} at ` +
+          `${dominantPercentage.toFixed(2)}%.\n\n` +
+          `Vegetation: Mean NDVI is ${meanNdvi.toFixed(4)}, ` +
+          `with a vegetation indicator of ${vegetationPercentage.toFixed(2)}%. ` +
+          `${vegetationStatus}.\n\n` +
+          `Water: Mean NDWI is ${meanNdwi.toFixed(4)}, ` +
+          `with a water indicator of ${waterPercentage.toFixed(2)}%. ` +
+          `${waterStatus}.\n\n` +
+          `Built-up: Mean NDBI is ${meanNdbi.toFixed(4)}, ` +
+          `with a built-up indicator of ${builtupPercentage.toFixed(2)}%. ` +
+          `${builtupStatus}.\n\n` +
+          `Short Conclusion: The measured NDVI, NDWI and NDBI indicators ` +
+          `should be considered together when interpreting this scene.`,
+      };
 
       setCombinedLandResult({
         ...combinedData,
@@ -728,7 +810,7 @@ const [multispectralAiInsight, setMultispectralAiInsight] = useState(null);
           other_percentage: otherPercentage,
           overlap_detected: overlapDetected,
         },
-        ai_insight: aiData,
+        ai_insight: deterministicInsight,
       });
     } catch (err) {
       console.error("Combined Land Intelligence failed:", err);
@@ -1209,17 +1291,44 @@ Use these numerical NDBI values together with the visible satellite image. Do no
       const combinedQuestion =
         `${userQuestion}${ndviEvidence}${ndwiEvidence}${ndbiEvidence}`;
 
-      const result = await askVQA({
-        file: selectedFile,
-        question: combinedQuestion,
+      // Phase 9C — HF credits are exhausted.
+      // Do not call the VQA endpoint, so no 402 request is generated.
+      // The rest of the satellite analysis remains fully available.
+      setAnswer({
+        success: false,
+        mode: "unavailable",
+        provider: "huggingface-unavailable",
+        answer:
+          "Satellite image question answering is temporarily unavailable because the AI inference credits are exhausted. " +
+          "NDVI, NDWI, NDBI and the deterministic satellite intelligence modules remain available.",
       });
-
-      setAnswer(result);
     } catch (err) {
-      setError(
+      const errorMessage =
         err?.message ||
-          "Unable to connect to the AI backend."
-      );
+        "Unable to connect to the AI backend.";
+
+      // =====================================================
+      // PHASE 9C — TOKEN-FREE VQA STATUS
+      // Keep the satellite analysis usable when HF credits
+      // are exhausted instead of showing a raw 402 error.
+      // =====================================================
+      if (
+        errorMessage.includes("402") ||
+        errorMessage.toLowerCase().includes("payment required") ||
+        errorMessage.toLowerCase().includes("credits")
+      ) {
+        setAnswer({
+          success: false,
+          mode: "unavailable",
+          provider: "huggingface-unavailable",
+          answer:
+            "Satellite image question answering is temporarily unavailable because the AI inference credits are exhausted. " +
+            "The satellite image, NDVI, NDWI, NDBI, land intelligence, change detection and temporal analysis remain available.",
+        });
+        setError("");
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -1246,6 +1355,461 @@ Use these numerical NDBI values together with the visible satellite image. Do no
     "Describe the land cover",
     "Are there agricultural areas?",
   ];
+
+  // =========================================================
+  // PHASE 8F / 8G — TEMPORAL STATISTICS + CHART HELPERS
+  // =========================================================
+
+  const getTemporalMetric = (row, index) => {
+    const key = index === "NDVI" ? "ndvi" : index === "NDWI" ? "ndwi" : "ndbi";
+    const value = row?.[key]?.mean;
+    return Number.isFinite(Number(value)) ? Number(value) : null;
+  };
+
+  const getTemporalPercentage = (row, index) => {
+    const key = index === "NDVI" ? "ndvi" : index === "NDWI" ? "ndwi" : "ndbi";
+    const value = row?.[key]?.percentage;
+    return Number.isFinite(Number(value)) ? Number(value) : null;
+  };
+
+  const temporalRows = [...unifiedTemporalResults].sort(
+    (a, b) => Number(a?.analysis_year || 0) - Number(b?.analysis_year || 0)
+  );
+
+  const temporalStats = selectedTemporalIndices.reduce((acc, index) => {
+    const values = temporalRows
+      .map((row) => getTemporalMetric(row, index))
+      .filter((value) => value !== null);
+
+    const percentages = temporalRows
+      .map((row) => getTemporalPercentage(row, index))
+      .filter((value) => value !== null);
+
+    if (!values.length) {
+      acc[index] = null;
+      return acc;
+    }
+
+    const first = values[0];
+    const last = values[values.length - 1];
+    const highest = Math.max(...values);
+    const lowest = Math.min(...values);
+    const highestYear = temporalRows.find((row) => getTemporalMetric(row, index) === highest)?.analysis_year;
+    const lowestYear = temporalRows.find((row) => getTemporalMetric(row, index) === lowest)?.analysis_year;
+    const delta = last - first;
+
+    acc[index] = {
+      first,
+      last,
+      delta,
+      firstYear: temporalRows[0]?.analysis_year,
+      lastYear: temporalRows[temporalRows.length - 1]?.analysis_year,
+      highest,
+      lowest,
+      highestYear,
+      lowestYear,
+      percentageDelta:
+        percentages.length >= 2 ? percentages[percentages.length - 1] - percentages[0] : null,
+      values,
+    };
+    return acc;
+  }, {});
+
+
+  // =========================================================
+  // PHASE 8H — DETERMINISTIC TEMPORAL SUMMARY
+  // =========================================================
+  // Uses only the already-computed Phase 8 temporal results.
+  // No new satellite processing or AI/API call is required.
+
+  const getTemporalDirection = (delta) => {
+    if (!Number.isFinite(Number(delta))) return "Unavailable";
+    const numericDelta = Number(delta);
+    if (Math.abs(numericDelta) < 0.01) return "Stable";
+    return numericDelta > 0 ? "Increasing" : "Decreasing";
+  };
+
+  const temporalSummaryStats = selectedTemporalIndices.reduce((acc, index) => {
+    const stat = temporalStats[index];
+
+    if (!stat) {
+      acc[index] = null;
+      return acc;
+    }
+
+    acc[index] = {
+      ...stat,
+      direction: getTemporalDirection(stat.delta),
+    };
+
+    return acc;
+  }, {});
+
+  const temporalDirections = selectedTemporalIndices
+    .map((index) => temporalSummaryStats[index]?.direction)
+    .filter(Boolean);
+
+  const overallTemporalObservation = (() => {
+    if (!temporalRows.length || !temporalDirections.length) {
+      return "No temporal observation is available yet.";
+    }
+
+    if (temporalRows.length === 1) {
+      return `Temporal analysis contains one available year (${temporalRows[0]?.analysis_year}); a multi-year trend cannot be established.`;
+    }
+
+    const uniqueDirections = [...new Set(temporalDirections)];
+
+    if (uniqueDirections.length === 1) {
+      const direction = uniqueDirections[0].toLowerCase();
+      return `Across the selected indices, the overall mean-index movement is ${direction} from the first available year to the last available year.`;
+    }
+
+    if (uniqueDirections.includes("Stable") && uniqueDirections.length === 2) {
+      return "The selected indices show a mixed temporal pattern, with at least one relatively stable indicator and another changing between the first and last available years.";
+    }
+
+    return "The selected indices show mixed temporal movement between the first and last available years.";
+  })();
+
+  // =========================================================
+  // PHASE 9A — EVIDENCE COLLECTION
+  // =========================================================
+  // Uses only results already produced by SatQuery-AI.
+  // No HF token, AI request, or extra satellite processing.
+
+  const getPhase9IndexEvidence = (result, index) => {
+    const stats = result?.stats || result?.statistics || {};
+    const meanKey = `mean_${index.toLowerCase()}`;
+    const percentageKey =
+      index === "NDVI"
+        ? "vegetation_percentage"
+        : index === "NDWI"
+          ? "water_percentage"
+          : "builtup_percentage";
+
+    const mean =
+      stats.mean ??
+      result?.[meanKey] ??
+      result?.mean ??
+      null;
+
+    const percentage =
+      stats[percentageKey] ??
+      result?.[percentageKey] ??
+      result?.[percentageKey.replace("_percentage", "_percent")] ??
+      null;
+
+    return {
+      mean: Number.isFinite(Number(mean)) ? Number(mean) : null,
+      percentage: Number.isFinite(Number(percentage))
+        ? Number(percentage)
+        : null,
+    };
+  };
+
+  const phase9Evidence = {
+    image: Boolean(selectedFile),
+    aoi: Boolean(activeAreaBounds),
+    ndvi: getPhase9IndexEvidence(ndviResult, "NDVI"),
+    ndwi: getPhase9IndexEvidence(ndwiResult, "NDWI"),
+    ndbi: getPhase9IndexEvidence(ndbiResult, "NDBI"),
+    combinedLand: Boolean(combinedLandResult),
+    change: Boolean(multispectralChangeResult?.success),
+    temporal: Boolean(temporalRows.length),
+  };
+
+  const phase9EvidenceCount = [
+    phase9Evidence.image && phase9Evidence.aoi,
+    phase9Evidence.ndvi.mean !== null,
+    phase9Evidence.ndwi.mean !== null,
+    phase9Evidence.ndbi.mean !== null,
+    phase9Evidence.combinedLand,
+    phase9Evidence.change,
+    phase9Evidence.temporal,
+  ].filter(Boolean).length;
+
+  // =========================================================
+  // PHASE 9B — DETERMINISTIC SATELLITE INTELLIGENCE
+  // =========================================================
+  // Converts already-computed evidence into a single factual
+  // satellite intelligence layer. No HF request or new
+  // satellite processing is performed.
+
+  const phase9Signal = (mean, type) => {
+    if (!Number.isFinite(Number(mean))) return "Unavailable";
+
+    const value = Number(mean);
+
+    if (type === "NDVI") {
+      if (value >= 0.60) return "High vegetation signal";
+      if (value >= 0.40) return "Moderate vegetation signal";
+      if (value >= 0.20) return "Low-to-moderate vegetation signal";
+      return "Low vegetation signal";
+    }
+
+    if (type === "NDWI") {
+      if (value >= 0.20) return "Higher water-related signal";
+      if (value >= 0.00) return "Moderate water-related signal";
+      return "Low water-related signal";
+    }
+
+    if (type === "NDBI") {
+      if (value >= 0.20) return "Higher built-up signal";
+      if (value >= 0.00) return "Moderate built-up signal";
+      return "Low built-up signal";
+    }
+
+    return "Unavailable";
+  };
+
+  const phase9IndexFindings = [
+    {
+      index: "NDVI",
+      evidence: phase9Evidence.ndvi,
+      signal: phase9Signal(phase9Evidence.ndvi.mean, "NDVI"),
+    },
+    {
+      index: "NDWI",
+      evidence: phase9Evidence.ndwi,
+      signal: phase9Signal(phase9Evidence.ndwi.mean, "NDWI"),
+    },
+    {
+      index: "NDBI",
+      evidence: phase9Evidence.ndbi,
+      signal: phase9Signal(phase9Evidence.ndbi.mean, "NDBI"),
+    },
+  ];
+
+  const phase9ChangeObservation =
+    multispectralChangeResult?.interpretation?.summary ||
+    multispectralChangeResult?.summary ||
+    "No multispectral change observation is available yet.";
+
+  const phase9LandObservation =
+    combinedLandResult?.land_characteristics?.classification
+      ? `${combinedLandResult.land_characteristics.classification}; ` +
+        `dominant measured indicator: ` +
+        `${combinedLandResult.land_characteristics.dominant_type}.`
+      : "Combined land-characteristic evidence is not available yet.";
+
+  const phase9BOverallObservation = (() => {
+    const available = phase9IndexFindings.filter(
+      (item) => item.evidence.mean !== null
+    );
+
+    if (!available.length) {
+      return "No deterministic satellite intelligence is available yet.";
+    }
+
+    const signals = available.map((item) => item.signal).join("; ");
+
+    if (combinedLandResult?.land_characteristics?.classification) {
+      return (
+        `${phase9LandObservation} ` +
+        `Index evidence: ${signals}.`
+      );
+    }
+
+    return `Index evidence: ${signals}.`;
+  })();
+
+  // =========================================================
+  // PHASE 9D — EVIDENCE EXPLANATION
+  // =========================================================
+  // Explains which completed SatQuery-AI module supports each
+  // observation. This is descriptive only and does not infer
+  // causes or fabricate confidence probabilities.
+
+  const phase9DEvidenceItems = [
+    {
+      key: "ndvi",
+      title: "Vegetation Observation",
+      source: "NDVI Analysis",
+      available: phase9Evidence.ndvi.mean !== null,
+      detail:
+        phase9Evidence.ndvi.mean !== null
+          ? `Mean NDVI ${phase9Evidence.ndvi.mean.toFixed(4)} with an indicator of ${
+              phase9Evidence.ndvi.percentage === null
+                ? "—"
+                : `${phase9Evidence.ndvi.percentage.toFixed(2)}%`
+            }.`
+          : "NDVI evidence is not available yet.",
+      interpretation:
+        phase9Evidence.ndvi.mean !== null
+          ? phase9Signal(phase9Evidence.ndvi.mean, "NDVI")
+          : "No vegetation observation can be described yet.",
+    },
+    {
+      key: "ndwi",
+      title: "Water Observation",
+      source: "NDWI Analysis",
+      available: phase9Evidence.ndwi.mean !== null,
+      detail:
+        phase9Evidence.ndwi.mean !== null
+          ? `Mean NDWI ${phase9Evidence.ndwi.mean.toFixed(4)} with an indicator of ${
+              phase9Evidence.ndwi.percentage === null
+                ? "—"
+                : `${phase9Evidence.ndwi.percentage.toFixed(2)}%`
+            }.`
+          : "NDWI evidence is not available yet.",
+      interpretation:
+        phase9Evidence.ndwi.mean !== null
+          ? phase9Signal(phase9Evidence.ndwi.mean, "NDWI")
+          : "No water-related observation can be described yet.",
+    },
+    {
+      key: "ndbi",
+      title: "Built-up Observation",
+      source: "NDBI Analysis",
+      available: phase9Evidence.ndbi.mean !== null,
+      detail:
+        phase9Evidence.ndbi.mean !== null
+          ? `Mean NDBI ${phase9Evidence.ndbi.mean.toFixed(4)} with an indicator of ${
+              phase9Evidence.ndbi.percentage === null
+                ? "—"
+                : `${phase9Evidence.ndbi.percentage.toFixed(2)}%`
+            }.`
+          : "NDBI evidence is not available yet.",
+      interpretation:
+        phase9Evidence.ndbi.mean !== null
+          ? phase9Signal(phase9Evidence.ndbi.mean, "NDBI")
+          : "No built-up observation can be described yet.",
+    },
+    {
+      key: "land",
+      title: "Land Characteristic",
+      source: "Combined Land Intelligence",
+      available: phase9Evidence.combinedLand,
+      detail: phase9Evidence.combinedLand
+        ? phase9LandObservation
+        : "Combined land-intelligence evidence is not available yet.",
+      interpretation: phase9Evidence.combinedLand
+        ? "Derived from the completed NDVI, NDWI and NDBI land indicators."
+        : "No combined land observation can be described yet.",
+    },
+    {
+      key: "change",
+      title: "Change Observation",
+      source: "Multispectral Change Detection",
+      available: phase9Evidence.change,
+      detail: phase9Evidence.change
+        ? phase9ChangeObservation
+        : "Multispectral change evidence is not available yet.",
+      interpretation: phase9Evidence.change
+        ? "Supported by the completed before/after multispectral comparison."
+        : "No change observation can be described yet.",
+    },
+    {
+      key: "temporal",
+      title: "Temporal Observation",
+      source: "Multi-Temporal Analysis",
+      available: phase9Evidence.temporal,
+      detail: phase9Evidence.temporal
+        ? overallTemporalObservation
+        : "Temporal evidence is not available yet.",
+      interpretation: phase9Evidence.temporal
+        ? `Supported by ${temporalRows.length} analyzed year${temporalRows.length === 1 ? "" : "s"}.`
+        : "No temporal observation can be described yet.",
+    },
+  ];
+
+  const phase9DAvailableEvidence = phase9DEvidenceItems.filter(
+    (item) => item.available
+  );
+
+  const phase9DExplanationCount = phase9DAvailableEvidence.length;
+
+  const temporalChartColors = {
+    NDVI: "#34d399",
+    NDWI: "#60a5fa",
+    NDBI: "#c084fc",
+  };
+
+  const renderTemporalChart = (index) => {
+    const rows = temporalRows
+      .map((row) => ({
+        year: row?.analysis_year,
+        value: getTemporalMetric(row, index),
+      }))
+      .filter((item) => item.value !== null);
+
+    if (!rows.length) return null;
+
+    const values = rows.map((item) => item.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const points = rows
+      .map((item, i) => {
+        const x = rows.length === 1 ? 50 : (i / (rows.length - 1)) * 100;
+        const y = 90 - ((item.value - min) / range) * 70;
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+    return (
+      <div key={index} className="rounded-2xl border border-white/10 bg-black/20 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-200">{index} Trend</p>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Mean index value across available years
+            </p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] text-gray-400">
+            {rows.length} YEARS
+          </span>
+        </div>
+
+        <div className="mt-5 rounded-xl border border-white/5 bg-[#050912] p-3">
+          <svg viewBox="0 0 100 100" className="h-44 w-full overflow-visible" preserveAspectRatio="none" aria-label={`${index} temporal trend`}>
+            <line x1="0" y1="20" x2="100" y2="20" stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />
+            <line x1="0" y1="55" x2="100" y2="55" stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />
+            <line x1="0" y1="90" x2="100" y2="90" stroke="rgba(255,255,255,0.10)" strokeWidth="0.6" />
+            <polyline
+              points={points}
+              fill="none"
+              stroke={temporalChartColors[index]}
+              strokeWidth="1.8"
+              vectorEffect="non-scaling-stroke"
+            />
+            {rows.map((item, i) => {
+              const x = rows.length === 1 ? 50 : (i / (rows.length - 1)) * 100;
+              const y = 90 - ((item.value - min) / range) * 70;
+              return (
+                <circle
+                  key={`${index}-${item.year}`}
+                  cx={x}
+                  cy={y}
+                  r="1.8"
+                  fill={temporalChartColors[index]}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })}
+          </svg>
+
+          <div className="mt-1 flex justify-between gap-2 text-[10px] text-gray-600">
+            {rows.map((item) => (
+              <span key={`${index}-label-${item.year}`}>{item.year}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <p className="text-gray-600">First</p>
+            <p className="mt-1 text-gray-300">{rows[0].value.toFixed(4)}</p>
+          </div>
+          <div>
+            <p className="text-gray-600">Last</p>
+            <p className="mt-1 text-gray-300">{rows[rows.length - 1].value.toFixed(4)}</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // =========================================================
   // UI
@@ -1477,9 +2041,8 @@ Use these numerical NDBI values together with the visible satellite image. Do no
         </div>
 
         {/* =================================================
-            PHASE 8A — MULTI-TEMPORAL ANALYSIS
+            PHASE 8A — CLEAN RESTART
             ================================================= */}
-
         <section className="mb-8 overflow-hidden rounded-3xl border border-cyan-400/20 bg-cyan-500/[0.035] shadow-2xl">
           <div className="border-b border-white/10 bg-cyan-500/[0.04] px-6 py-6">
             <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -1491,9 +2054,7 @@ Use these numerical NDBI values together with the visible satellite image. Do no
                   Multi-Year Satellite Scenes
                 </h3>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
-                  Retrieve one representative Sentinel-2 scene for each year
-                  over the same selected AOI. Phase 8A retrieves scene metadata
-                  only; spectral analysis comes later.
+                  Retrieve one representative Sentinel-2 L2A scene for each year over the same selected AOI. Phase 8A is metadata-only; spectral analysis starts after this stage is verified.
                 </p>
               </div>
 
@@ -1501,202 +2062,848 @@ Use these numerical NDBI values together with the visible satellite image. Do no
                 isMultiTemporalLoading
                   ? "border-yellow-400/20 bg-yellow-400/10 text-yellow-400"
                   : multiTemporalScenes.length
-                  ? "border-green-400/20 bg-green-400/10 text-green-400"
+                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
                   : "border-white/10 bg-white/5 text-gray-500"
               }`}>
-                {isMultiTemporalLoading
-                  ? "RETRIEVING"
-                  : multiTemporalScenes.length
-                  ? "SCENES READY"
+                {isMultiTemporalLoading ? "RETRIEVING" : multiTemporalScenes.length ? `${multiTemporalScenes.length} YEARS READY` : "READY"}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {!activeAreaBounds ? (
+              <div className="rounded-2xl border border-yellow-400/20 bg-yellow-400/[0.05] p-4">
+                <p className="text-sm font-medium text-yellow-300">Select an Analysis Area first</p>
+                <p className="mt-1 text-xs leading-5 text-gray-500">Go to GeoLocation, select the AOI, then open Image Analysis.</p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-5 rounded-2xl border border-cyan-400/15 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-gray-500">Active AOI</p>
+                      <p className="mt-1 text-sm text-gray-300">The same selected area will be used for every requested year.</p>
+                    </div>
+                    <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] text-cyan-300">AOI LOCKED</span>
+                  </div>
+                  <p className="mt-3 break-all text-xs text-gray-500">{JSON.stringify(activeAreaBounds)}</p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ["Start Year", multiTemporalStartYear, setMultiTemporalStartYear, "number"],
+                    ["End Year", multiTemporalEndYear, setMultiTemporalEndYear, "number"],
+                    ["Target Month", multiTemporalMonth, setMultiTemporalMonth, "number"],
+                    ["Target Day", multiTemporalDay, setMultiTemporalDay, "number"],
+                    ["Search Window (± days)", multiTemporalWindowDays, setMultiTemporalWindowDays, "number"],
+                    ["Max Cloud Cover %", multiTemporalCloudCover, setMultiTemporalCloudCover, "number"],
+                  ].map(([label, value, setter, type]) => (
+                    <label key={label} className="block">
+                      <span className="text-xs uppercase tracking-wider text-gray-500">{label}</span>
+                      <input
+                        type={type}
+                        value={value}
+                        onChange={(event) => setter(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-gray-200 outline-none transition focus:border-cyan-400/40"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex flex-col items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={retrieveMultiTemporalScenes}
+                    disabled={isMultiTemporalLoading}
+                    className="rounded-2xl bg-cyan-400 px-7 py-3.5 text-sm font-semibold text-black shadow-lg shadow-cyan-500/10 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isMultiTemporalLoading ? "Retrieving Scenes..." : "🛰️ Retrieve Multi-Year Scenes"}
+                  </button>
+                  <p className="text-[11px] text-gray-600">Clean restart defaults: 2022 → 2026 · June 15 · ±180 days · up to 100% cloud cover.</p>
+                </div>
+              </>
+            )}
+
+            {multiTemporalError && (
+              <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/[0.05] p-4">
+                <p className="text-sm text-red-300">{multiTemporalError}</p>
+              </div>
+            )}
+
+            {multiTemporalScenes.length > 0 && (
+              <div className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+                {multiTemporalScenes.map((scene) => (
+                  <div key={`${scene.analysis_year}-${scene.id || scene.product_name || "scene"}`} className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.035] p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-lg font-semibold text-gray-200">{scene.analysis_year}</span>
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-300">FOUND</span>
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500">Date: {scene.acquisition_date ? String(scene.acquisition_date).slice(0, 10) : "—"}</p>
+                    <p className="mt-1 text-xs text-gray-500">Cloud: {Number.isFinite(Number(scene.cloud_cover)) ? `${Number(scene.cloud_cover).toFixed(1)}%` : "—"}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* =================================================
+            PHASE 8 — UNIFIED MULTI-TEMPORAL INDEX ANALYSIS
+            ================================================= */}
+        <section className="mb-8 overflow-hidden rounded-3xl border border-violet-400/20 bg-violet-500/[0.035] shadow-2xl">
+          <div className="border-b border-white/10 bg-violet-500/[0.04] px-6 py-6">
+            <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+              <div>
+                <p className="text-xs uppercase tracking-[0.3em] text-violet-400">
+                  Phase 8 · Unified Spectral Analysis
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold">
+                  Multi-Temporal Index Analysis
+                </h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
+                  Select the indices you need. The selected Sentinel-2 scenes are analyzed for every available year and returned in one combined table. AOI coverage is checked automatically.
+                </p>
+              </div>
+
+              <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-wider ${
+                isUnifiedTemporalAnalyzing
+                  ? "border-yellow-400/20 bg-yellow-400/10 text-yellow-400"
+                  : unifiedTemporalResults.length
+                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                  : "border-white/10 bg-white/5 text-gray-500"
+              }`}>
+                {isUnifiedTemporalAnalyzing
+                  ? "ANALYZING"
+                  : unifiedTemporalResults.length
+                  ? `${unifiedTemporalResults.length} YEARS READY`
                   : "READY"}
               </span>
             </div>
           </div>
 
           <div className="p-6">
-            {!activeAreaBounds && (
-              <div className="mb-5 rounded-2xl border border-yellow-400/20 bg-yellow-400/[0.05] p-4">
-                <p className="text-sm font-medium text-yellow-300">
-                  Select an Analysis Area first
-                </p>
+            {!multiTemporalScenes.length ? (
+              <div className="rounded-2xl border border-yellow-400/20 bg-yellow-400/[0.05] p-4">
+                <p className="text-sm font-medium text-yellow-300">Retrieve multi-year scenes first</p>
                 <p className="mt-1 text-xs leading-5 text-gray-500">
-                  Go to GeoLocation, select the AOI you want to study, then
-                  open Image Analysis.
+                  Complete Phase 8A above, then choose the spectral indices you want to compare.
                 </p>
               </div>
-            )}
+            ) : (
+              <>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-gray-500">Select what you need</p>
+                      <p className="mt-1 text-sm text-gray-300">
+                        Only the checked indices will be processed.
+                      </p>
+                    </div>
 
-            {activeAreaBounds && (
-              <div className="mb-5 rounded-2xl border border-cyan-400/15 bg-black/20 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-gray-500">
-                      Active AOI
-                    </p>
-                    <p className="mt-1 text-sm text-gray-300">
-                      The same selected area will be used for every requested
-                      year.
-                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      {["NDVI", "NDWI", "NDBI"].map((index) => {
+                        const checked = selectedTemporalIndices.includes(index);
+                        const descriptions = {
+                          NDVI: "Vegetation",
+                          NDWI: "Water",
+                          NDBI: "Built-up",
+                        };
+                        return (
+                          <label
+                            key={index}
+                            className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition ${
+                              checked
+                                ? "border-violet-400/40 bg-violet-400/10"
+                                : "border-white/10 bg-white/[0.02] hover:border-white/20"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleTemporalIndex(index)}
+                              className="h-4 w-4 accent-violet-400"
+                            />
+                            <span>
+                              <span className="block text-sm font-semibold text-gray-200">{index}</span>
+                              <span className="block text-[10px] text-gray-500">{descriptions[index]}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] text-cyan-300">
-                    AOI LOCKED
-                  </span>
-                </div>
 
-                <p className="mt-3 break-all text-xs text-gray-500">
-                  {JSON.stringify(activeAreaBounds)}
-                </p>
-              </div>
-            )}
-
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <TemporalInput
-                label="Start Year"
-                type="number"
-                min="2015"
-                value={multiTemporalStartYear}
-                onChange={setMultiTemporalStartYear}
-              />
-              <TemporalInput
-                label="End Year"
-                type="number"
-                min="2015"
-                value={multiTemporalEndYear}
-                onChange={setMultiTemporalEndYear}
-              />
-              <TemporalInput
-                label="Target Month"
-                type="number"
-                min="1"
-                max="12"
-                value={multiTemporalMonth}
-                onChange={setMultiTemporalMonth}
-              />
-              <TemporalInput
-                label="Target Day"
-                type="number"
-                min="1"
-                max="31"
-                value={multiTemporalDay}
-                onChange={setMultiTemporalDay}
-              />
-              <TemporalInput
-                label="Search Window (± days)"
-                type="number"
-                min="0"
-                max="180"
-                value={multiTemporalWindowDays}
-                onChange={setMultiTemporalWindowDays}
-              />
-              <TemporalInput
-                label="Max Cloud Cover %"
-                type="number"
-                min="0"
-                max="100"
-                value={multiTemporalCloudCover}
-                onChange={setMultiTemporalCloudCover}
-              />
-            </div>
-
-            <div className="mt-5 flex flex-col items-center gap-3">
-              <button
-                type="button"
-                onClick={retrieveMultiTemporalScenes}
-                disabled={!activeAreaBounds || isMultiTemporalLoading}
-                className={`rounded-2xl px-8 py-3.5 text-sm font-semibold shadow-xl transition ${
-                  activeAreaBounds && !isMultiTemporalLoading
-                    ? "bg-cyan-500 text-black shadow-cyan-500/20 hover:scale-[1.02] hover:bg-cyan-400"
-                    : "cursor-not-allowed bg-gray-700 text-gray-500"
-                }`}
-              >
-                {isMultiTemporalLoading ? (
-                  <>
-                    <span className="mr-2 inline-block animate-spin">◌</span>
-                    Retrieving Year-wise Scenes...
-                  </>
-                ) : (
-                  <>🛰️ Retrieve Multi-Year Scenes</>
-                )}
-              </button>
-
-              <p className="text-[11px] text-gray-600">
-                Default study period: 2022 → 2026
-              </p>
-            </div>
-
-            {multiTemporalError && (
-              <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/[0.05] p-4">
-                <p className="text-sm leading-6 text-red-300">
-                  {multiTemporalError}
-                </p>
-              </div>
-            )}
-
-            {multiTemporalScenes.length > 0 && (
-              <div className="mt-6">
-                <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-400">
-                      Retrieved Scenes
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      One representative Sentinel-2 scene for each available
-                      year.
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-gray-400">
-                    {multiTemporalScenes.length} YEAR
-                    {multiTemporalScenes.length === 1 ? "" : "S"} FOUND
-                  </span>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {multiTemporalScenes.map((scene, index) => (
-                    <div
-                      key={`${scene?.analysis_year || "year"}-${scene?.id || index}`}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                  <div className="mt-5 flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={analyzeSelectedTemporalIndices}
+                      disabled={isUnifiedTemporalAnalyzing || !selectedTemporalIndices.length}
+                      className="rounded-2xl bg-violet-400 px-7 py-3.5 text-sm font-semibold text-black shadow-lg shadow-violet-500/10 transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-lg font-semibold text-cyan-300">
-                          {scene?.analysis_year || "—"}
-                        </span>
-                        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-400">
-                          Sentinel-2
+                      {isUnifiedTemporalAnalyzing ? "Analyzing Selected..." : "📊 Analyze Selected"}
+                    </button>
+                    <p className="text-[11px] text-gray-600">
+                      {multiTemporalScenes.length} temporal scene{multiTemporalScenes.length === 1 ? "" : "s"} available · AOI coverage is checked automatically.
+                    </p>
+                  </div>
+                </div>
+
+                {unifiedTemporalValidation?.same_aoi && (
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.04] px-4 py-3">
+                    <span className="text-xs text-emerald-300">✓ SAME AOI COVERAGE VERIFIED</span>
+                    <span className="text-[11px] text-gray-500">
+                      {unifiedTemporalValidation.valid_years?.length || 0}/{multiTemporalScenes.length} scenes valid
+                    </span>
+                  </div>
+                )}
+
+                {unifiedTemporalError && (
+                  <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-500/[0.05] p-4">
+                    <p className="text-sm text-red-300">{unifiedTemporalError}</p>
+                  </div>
+                )}
+
+                {unifiedTemporalResults.length > 0 && (
+                  <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                    <div className="flex flex-col gap-2 border-b border-white/10 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-200">Year-wise Comparison</p>
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          {selectedTemporalIndices.join(" + ")} · independent threshold-based percentages
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-3 py-1 text-[10px] text-violet-300">
+                        {unifiedTemporalResults.length} YEARS
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-left text-xs">
+                        <thead className="border-b border-white/10 bg-white/[0.025] text-gray-500">
+                          <tr>
+                            <th className="whitespace-nowrap px-4 py-3 font-medium">Year</th>
+                            <th className="whitespace-nowrap px-4 py-3 font-medium">Date</th>
+                            {selectedTemporalIndices.includes("NDVI") && (
+                              <>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Mean NDVI</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Vegetation %</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Health</th>
+                              </>
+                            )}
+                            {selectedTemporalIndices.includes("NDWI") && (
+                              <>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Mean NDWI</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Water %</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Status</th>
+                              </>
+                            )}
+                            {selectedTemporalIndices.includes("NDBI") && (
+                              <>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Mean NDBI</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Built-up %</th>
+                                <th className="whitespace-nowrap px-4 py-3 font-medium">Status</th>
+                              </>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {unifiedTemporalResults.map((row) => (
+                            <tr key={`${row.analysis_year}-${row.scene_id || row.date}`} className="border-b border-white/5 last:border-b-0">
+                              <td className="whitespace-nowrap px-4 py-3 font-semibold text-gray-200">{row.analysis_year}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-gray-500">{row.date || "—"}</td>
+                              {selectedTemporalIndices.includes("NDVI") && (
+                                <>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndvi ? Number(row.ndvi.mean).toFixed(4) : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndvi ? `${Number(row.ndvi.percentage).toFixed(2)}%` : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-500">{row.ndvi?.health || "—"}</td>
+                                </>
+                              )}
+                              {selectedTemporalIndices.includes("NDWI") && (
+                                <>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndwi ? Number(row.ndwi.mean).toFixed(4) : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndwi ? `${Number(row.ndwi.percentage).toFixed(2)}%` : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-500">{row.ndwi?.status || "—"}</td>
+                                </>
+                              )}
+                              {selectedTemporalIndices.includes("NDBI") && (
+                                <>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndbi ? Number(row.ndbi.mean).toFixed(4) : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-300">{row.ndbi ? `${Number(row.ndbi.percentage).toFixed(2)}%` : "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-500">{row.ndbi?.status || "—"}</td>
+                                </>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {unifiedTemporalResults.length > 0 && (
+                  <>
+                    {/* =================================================
+                        PHASE 8F — TEMPORAL TREND STATISTICS
+                        ================================================= */}
+                    <div className="mt-6 rounded-2xl border border-violet-400/20 bg-violet-500/[0.035] p-5">
+                      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.25em] text-violet-300">
+                            Phase 8F · Trend Statistics
+                          </p>
+                          <h4 className="mt-1 text-xl font-semibold text-white">
+                            Temporal Trend Statistics
+                          </h4>
+                          <p className="mt-2 text-xs leading-5 text-gray-500">
+                            First-year vs last-year movement, highest/lowest year, and percentage change for the selected indices.
+                          </p>
+                        </div>
+                        <span className="w-fit rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-violet-200">
+                          {selectedTemporalIndices.length} INDEX{selectedTemporalIndices.length === 1 ? "" : "ES"} ANALYZED
                         </span>
                       </div>
 
-                      <div className="mt-4 space-y-2 text-xs">
+                      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                        {selectedTemporalIndices.map((index) => {
+                          const stat = temporalStats[index];
+                          if (!stat) return null;
+                          const sign = stat.delta >= 0 ? "+" : "";
+                          const pctSign = stat.percentageDelta === null || stat.percentageDelta >= 0 ? "+" : "";
+                          return (
+                            <div key={`trend-stat-${index}`} className="rounded-xl border border-white/10 bg-black/10 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-gray-200">{index}</p>
+                                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-400">
+                                  {stat.delta >= 0 ? "Increasing" : "Decreasing"}
+                                </span>
+                              </div>
+                              <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                                <div><p className="text-gray-600">First year</p><p className="mt-1 text-gray-300">{stat.firstYear}: {stat.first.toFixed(4)}</p></div>
+                                <div><p className="text-gray-600">Last year</p><p className="mt-1 text-gray-300">{stat.lastYear}: {stat.last.toFixed(4)}</p></div>
+                                <div><p className="text-gray-600">Change</p><p className="mt-1 text-gray-300">{sign}{stat.delta.toFixed(4)}</p></div>
+                                <div><p className="text-gray-600">% indicator change</p><p className="mt-1 text-gray-300">{stat.percentageDelta === null ? "—" : `${pctSign}${stat.percentageDelta.toFixed(2)} pp`}</p></div>
+                              </div>
+                              <p className="mt-4 text-[11px] text-gray-500">
+                                Highest: {stat.highestYear} · Lowest: {stat.lowestYear}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* =================================================
+                        PHASE 8G — TIMELINE + CHARTS
+                        ================================================= */}
+                    <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.025] p-5">
+                      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                         <div>
-                          <span className="text-gray-600">Acquisition</span>
-                          <p className="mt-0.5 text-gray-300">
-                            {scene?.acquisition_date
-                              ? String(scene.acquisition_date).slice(0, 10)
-                              : "Unavailable"}
+                          <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">
+                            Phase 8G · Timeline + Charts
+                          </p>
+                          <h4 className="mt-1 text-xl font-semibold text-white">
+                            Multi-Year Temporal Visualization
+                          </h4>
+                          <p className="mt-2 text-xs leading-5 text-gray-500">
+                            Visual timeline and trend charts reuse the completed Phase 8 analysis results. No additional satellite processing is required.
                           </p>
                         </div>
+                        <span className="w-fit rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200">
+                          {temporalRows.length} YEAR TIMELINE
+                        </span>
+                      </div>
+
+                      <div className="mt-6 grid gap-3 md:grid-cols-4">
+                        {temporalRows.map((row, index) => (
+                          <div key={`timeline-${row.analysis_year}`} className="relative rounded-xl border border-white/10 bg-black/20 p-4">
+                            {index < temporalRows.length - 1 && (
+                              <div className="absolute left-full top-1/2 hidden h-px w-3 bg-cyan-400/30 md:block" />
+                            )}
+                            <p className="text-lg font-semibold text-cyan-200">{row.analysis_year}</p>
+                            <p className="mt-1 text-[11px] text-gray-500">{row.date || "Date unavailable"}</p>
+                            <div className="mt-3 space-y-1 text-[11px] text-gray-400">
+                              {selectedTemporalIndices.map((indexName) => {
+                                const value = getTemporalMetric(row, indexName);
+                                return (
+                                  <div key={`${row.analysis_year}-${indexName}`} className="flex justify-between gap-2">
+                                    <span>{indexName}</span>
+                                    <span className="text-gray-300">{value === null ? "—" : value.toFixed(4)}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                        {selectedTemporalIndices.map(renderTemporalChart)}
+                      </div>
+
+                      <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
                         <div>
-                          <span className="text-gray-600">Cloud Cover</span>
-                          <p className="mt-0.5 text-gray-300">
-                            {scene?.cloud_cover !== null &&
-                            scene?.cloud_cover !== undefined
-                              ? `${Number(scene.cloud_cover).toFixed(2)}%`
-                              : "Unavailable"}
-                          </p>
+                          <p className="text-sm font-semibold text-gray-200">First Year vs Last Year</p>
+                          <p className="mt-1 text-[11px] text-gray-500">Comparison of mean index values across the selected temporal range.</p>
                         </div>
-                        <div>
-                          <span className="text-gray-600">Scene ID</span>
-                          <p className="mt-0.5 break-all text-gray-400">
-                            {scene?.id || "Unavailable"}
-                          </p>
+
+                        <div className="mt-6 grid gap-5 md:grid-cols-3">
+                          {selectedTemporalIndices.map((index) => {
+                            const stat = temporalStats[index];
+                            if (!stat) return null;
+                            const maxAbs = Math.max(Math.abs(stat.first), Math.abs(stat.last), 0.0001);
+                            const firstWidth = Math.min(100, Math.abs(stat.first) / maxAbs * 100);
+                            const lastWidth = Math.min(100, Math.abs(stat.last) / maxAbs * 100);
+                            return (
+                              <div key={`comparison-${index}`} className="rounded-xl border border-white/10 bg-[#050912] p-4">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-semibold text-gray-200">{index}</span>
+                                  <span className="text-[10px] text-gray-500">{stat.firstYear} → {stat.lastYear}</span>
+                                </div>
+                                <div className="mt-4 space-y-3">
+                                  <div>
+                                    <div className="mb-1 flex justify-between text-[10px] text-gray-500"><span>First</span><span>{stat.first.toFixed(4)}</span></div>
+                                    <div className="h-2 rounded-full bg-white/5"><div className="h-2 rounded-full bg-cyan-400/70" style={{ width: `${firstWidth}%` }} /></div>
+                                  </div>
+                                  <div>
+                                    <div className="mb-1 flex justify-between text-[10px] text-gray-500"><span>Last</span><span>{stat.last.toFixed(4)}</span></div>
+                                    <div className="h-2 rounded-full bg-white/5"><div className="h-2 rounded-full bg-violet-400/70" style={{ width: `${lastWidth}%` }} /></div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+
+
+                    {/* =================================================
+                        PHASE 8H — TEMPORAL SUMMARY
+                        ================================================= */}
+                    <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.025] p-5">
+                      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.25em] text-emerald-300">
+                            Phase 8H · Temporal Summary
+                          </p>
+                          <h4 className="mt-1 text-xl font-semibold text-white">
+                            Multi-Year Temporal Summary
+                          </h4>
+                          <p className="mt-2 text-xs leading-5 text-gray-500">
+                            Deterministic summary generated from the completed temporal results. No AI token or additional satellite processing is required.
+                          </p>
+                        </div>
+                        <span className="w-fit rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-emerald-200">
+                          {temporalRows.length} YEARS ANALYZED
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                        {selectedTemporalIndices.map((index) => {
+                          const stat = temporalSummaryStats[index];
+                          if (!stat) return null;
+
+                          const directionClass =
+                            stat.direction === "Increasing"
+                              ? "text-emerald-300 border-emerald-400/20 bg-emerald-400/10"
+                              : stat.direction === "Decreasing"
+                                ? "text-amber-300 border-amber-400/20 bg-amber-400/10"
+                                : "text-gray-300 border-white/10 bg-white/5";
+
+                          const changeSign = stat.delta > 0 ? "+" : "";
+
+                          return (
+                            <div
+                              key={`temporal-summary-${index}`}
+                              className="rounded-xl border border-white/10 bg-black/20 p-4"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-gray-200">
+                                  {index}
+                                </p>
+                                <span
+                                  className={`rounded-full border px-2.5 py-1 text-[10px] ${directionClass}`}
+                                >
+                                  {stat.direction}
+                                </span>
+                              </div>
+
+                              <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <p className="text-gray-600">First</p>
+                                  <p className="mt-1 text-gray-300">
+                                    {stat.firstYear}: {stat.first.toFixed(4)}
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <p className="text-gray-600">Last</p>
+                                  <p className="mt-1 text-gray-300">
+                                    {stat.lastYear}: {stat.last.toFixed(4)}
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <p className="text-gray-600">Change</p>
+                                  <p className="mt-1 text-gray-300">
+                                    {changeSign}{stat.delta.toFixed(4)}
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <p className="text-gray-600">Indicator change</p>
+                                  <p className="mt-1 text-gray-300">
+                                    {stat.percentageDelta === null
+                                      ? "—"
+                                      : `${stat.percentageDelta > 0 ? "+" : ""}${stat.percentageDelta.toFixed(2)} pp`}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2">
+                                <p className="text-[10px] uppercase tracking-wider text-gray-600">
+                                  Range
+                                </p>
+                                <p className="mt-1 text-xs text-gray-400">
+                                  Highest: <span className="text-gray-300">{stat.highestYear}</span>
+                                  {" · "}
+                                  Lowest: <span className="text-gray-300">{stat.lowestYear}</span>
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-5 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.04] p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">
+                              Overall Temporal Observation
+                            </p>
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              Based only on the first-to-last movement of the selected index means.
+                            </p>
+                          </div>
+                          <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] text-gray-500">
+                            DATA-BASED
+                          </span>
+                        </div>
+
+                        <p className="mt-4 text-sm leading-6 text-gray-200">
+                          {overallTemporalObservation}
+                        </p>
+
+                        <p className="mt-3 text-[11px] leading-5 text-gray-600">
+                          This summary describes observed index movement only; it does not infer the cause of the change.
+                        </p>
+                      </div>
+                    </div>
+
+                  </>
+                )}
+              </>
             )}
           </div>
         </section>
+
+        {/* =================================================
+            PHASE 9A — EVIDENCE COLLECTION
+            ================================================= */}
+        {phase9EvidenceCount > 0 && (
+          <section className="mb-8 rounded-3xl border border-blue-400/20 bg-blue-500/[0.025] p-6 shadow-2xl">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-blue-300">
+                  Phase 9A · Evidence Collection
+                </p>
+                <h3 className="mt-1 text-2xl font-semibold text-white">
+                  Satellite Evidence Layer
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Existing image, spectral, change and temporal results are collected into one evidence layer. No AI token or additional satellite processing is required.
+                </p>
+              </div>
+              <span className="w-fit rounded-full border border-blue-300/20 bg-blue-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-blue-200">
+                {phase9EvidenceCount}/7 SOURCES READY
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Image + AOI", phase9Evidence.image && phase9Evidence.aoi],
+                ["NDVI", phase9Evidence.ndvi.mean !== null],
+                ["NDWI", phase9Evidence.ndwi.mean !== null],
+                ["NDBI", phase9Evidence.ndbi.mean !== null],
+                ["Land Intelligence", phase9Evidence.combinedLand],
+                ["Change Detection", phase9Evidence.change],
+                ["Temporal Analysis", phase9Evidence.temporal],
+              ].map(([label, ready]) => (
+                <div
+                  key={`phase9-${label}`}
+                  className="rounded-xl border border-white/10 bg-black/20 px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-400">{label}</span>
+                    <span
+                      className={`rounded-full px-2 py-1 text-[10px] ${
+                        ready
+                          ? "bg-emerald-400/10 text-emerald-300"
+                          : "bg-white/5 text-gray-600"
+                      }`}
+                    >
+                      {ready ? "READY" : "WAITING"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              {["NDVI", "NDWI", "NDBI"].map((index) => {
+                const evidence = phase9Evidence[index.toLowerCase()];
+                return (
+                  <div
+                    key={`phase9-index-${index}`}
+                    className="rounded-xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <p className="text-sm font-semibold text-gray-200">{index}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <p className="text-gray-600">Mean</p>
+                        <p className="mt-1 text-gray-300">
+                          {evidence.mean === null ? "—" : evidence.mean.toFixed(4)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Indicator</p>
+                        <p className="mt-1 text-gray-300">
+                          {evidence.percentage === null
+                            ? "—"
+                            : `${evidence.percentage.toFixed(2)}%`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {phase9Evidence.temporal && (
+              <div className="mt-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4">
+                <p className="text-[10px] uppercase tracking-wider text-cyan-300">
+                  Temporal Evidence
+                </p>
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  {overallTemporalObservation}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-4 rounded-xl border border-blue-400/15 bg-blue-400/[0.035] px-4 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-blue-300">
+                Token-Free Phase 9
+              </p>
+              <p className="mt-1 text-xs leading-5 text-gray-400">
+                This evidence layer is ready for the next deterministic satellite-intelligence step.
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* =================================================
+            PHASE 9B — DETERMINISTIC SATELLITE INTELLIGENCE
+            ================================================= */}
+        {phase9EvidenceCount > 0 && (
+          <section className="mb-8 rounded-3xl border border-violet-400/20 bg-violet-500/[0.025] p-6 shadow-2xl">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-violet-300">
+                  Phase 9B · Deterministic Satellite Intelligence
+                </p>
+                <h3 className="mt-1 text-2xl font-semibold text-white">
+                  Satellite Intelligence Layer
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Existing spectral, land, change and temporal evidence is interpreted together. No AI token or additional satellite processing is required.
+                </p>
+              </div>
+              <span className="w-fit rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-violet-200">
+                TOKEN-FREE
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              {phase9IndexFindings.map((item) => (
+                <div
+                  key={`phase9b-${item.index}`}
+                  className="rounded-xl border border-white/10 bg-black/20 p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-200">
+                      {item.index}
+                    </p>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-500">
+                      EVIDENCE
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-gray-600">Mean</p>
+                      <p className="mt-1 text-gray-300">
+                        {item.evidence.mean === null
+                          ? "—"
+                          : item.evidence.mean.toFixed(4)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Indicator</p>
+                      <p className="mt-1 text-gray-300">
+                        {item.evidence.percentage === null
+                          ? "—"
+                          : `${item.evidence.percentage.toFixed(2)}%`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-xs leading-5 text-violet-200">
+                    {item.signal}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                  Land Intelligence
+                </p>
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  {phase9LandObservation}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                  Temporal Evidence
+                </p>
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  {phase9Evidence.temporal
+                    ? overallTemporalObservation
+                    : "No temporal evidence is available yet."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4">
+              <p className="text-[10px] uppercase tracking-wider text-cyan-300">
+                Change Evidence
+              </p>
+              <p className="mt-2 text-sm leading-6 text-gray-300">
+                {phase9Evidence.change
+                  ? phase9ChangeObservation
+                  : "No multispectral change evidence is available yet."}
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-violet-400/15 bg-violet-400/[0.035] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] uppercase tracking-wider text-violet-300">
+                  Overall Satellite Observation
+                </p>
+                <span className="text-[10px] text-violet-300">
+                  DATA-BASED
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-gray-200">
+                {phase9BOverallObservation}
+              </p>
+              <p className="mt-3 text-[11px] leading-5 text-gray-500">
+                This layer summarizes observed measurements and completed analyses. It does not infer the cause of observed changes.
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* =================================================
+            PHASE 9D — EVIDENCE EXPLANATION
+            ================================================= */}
+        {phase9EvidenceCount > 0 && (
+          <section className="mb-8 rounded-3xl border border-cyan-400/20 bg-cyan-500/[0.02] p-6 shadow-2xl">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">
+                  Phase 9D · Evidence Explanation
+                </p>
+                <h3 className="mt-1 text-2xl font-semibold text-white">
+                  Why This Observation?
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Each satellite observation is linked to the SatQuery-AI module that produced the supporting evidence.
+                </p>
+              </div>
+              <span className="w-fit rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200">
+                {phase9DExplanationCount} SOURCES EXPLAINED
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {phase9DEvidenceItems.map((item) => (
+                <div
+                  key={`phase9d-${item.key}`}
+                  className={`rounded-xl border p-4 ${
+                    item.available
+                      ? "border-white/10 bg-black/20"
+                      : "border-white/5 bg-black/10 opacity-60"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-200">
+                        {item.title}
+                      </p>
+                      <p className="mt-1 text-[10px] uppercase tracking-wider text-cyan-300">
+                        Source · {item.source}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[10px] ${
+                        item.available
+                          ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+                          : "border-white/10 bg-white/5 text-gray-500"
+                      }`}
+                    >
+                      {item.available ? "AVAILABLE" : "WAITING"}
+                    </span>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-6 text-gray-300">
+                    {item.detail}
+                  </p>
+
+                  <div className="mt-3 rounded-lg border border-cyan-400/10 bg-cyan-400/[0.025] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Evidence interpretation
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-cyan-100/80">
+                      {item.interpretation}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] px-4 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-cyan-300">
+                Evidence rule
+              </p>
+              <p className="mt-1 text-xs leading-5 text-gray-400">
+                These explanations describe which measured or completed analysis supports each observation. They do not infer causes, events, locations, or unsupported confidence values.
+              </p>
+            </div>
+          </section>
+        )}
 
         {/* WORKSPACE */}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -2369,7 +3576,7 @@ Use these numerical NDBI values together with the visible satellite image. Do no
                       <span className="text-[10px] text-gray-500">
                         {combinedLandResult.ai_insight.mode === "live"
                           ? "LIVE MODEL"
-                          : "DEMO FALLBACK"}
+                          : "DETERMINISTIC"}
                       </span>
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-200">
@@ -2382,7 +3589,7 @@ Use these numerical NDBI values together with the visible satellite image. Do no
 
             {isCombinedLandAnalyzing && (
               <div className="mt-5 rounded-xl border border-violet-400/20 bg-violet-400/[0.05] p-3 text-xs text-violet-300">
-                Combining NDVI + NDWI + NDBI and generating AI land insight...
+                Combining NDVI + NDWI + NDBI and generating deterministic land intelligence...
               </div>
             )}
 
@@ -2404,9 +3611,12 @@ Use these numerical NDBI values together with the visible satellite image. Do no
                   </p>
 
                   <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-400">
-                    {answer.provider ===
-                    "huggingface"
+                    {answer.mode === "unavailable"
+                      ? "AI UNAVAILABLE"
+                      : answer.provider === "huggingface"
                       ? "LIVE MODEL"
+                      : answer.provider === "local-evidence"
+                      ? "DETERMINISTIC"
                       : "DEMO FALLBACK"}
                   </span>
                 </div>
@@ -2471,35 +3681,6 @@ Use these numerical NDBI values together with the visible satellite image. Do no
         {renderMultispectralChange()}
 
       </main>
-    </div>
-  );
-}
-
-// =========================================================
-// PHASE 8A TEMPORAL INPUT
-// =========================================================
-
-function TemporalInput({
-  label,
-  type = "text",
-  min,
-  max,
-  value,
-  onChange,
-}) {
-  return (
-    <div>
-      <label className="mb-2 block text-xs uppercase tracking-wider text-gray-500">
-        {label}
-      </label>
-      <input
-        type={type}
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-500/50"
-      />
     </div>
   );
 }

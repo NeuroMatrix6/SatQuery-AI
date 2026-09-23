@@ -13,6 +13,16 @@ import time
 import cv2
 import numpy as np
 
+try:
+    import tifffile
+except ImportError:
+    tifffile = None
+
+try:
+    import rasterio
+except ImportError:
+    rasterio = None
+
 
 # ============================================================
 # CONFIGURATION
@@ -72,8 +82,8 @@ CDSE_TOKEN_URL = (
 )
 
 CDSE_CATALOG_URL = (
-    "https://sh.dataspace.copernicus.eu/"
-    "catalog/v1/search"
+    "https://stac.dataspace.copernicus.eu/"
+    "v1/search"
 )
 
 CDSE_PROCESS_URL = (
@@ -489,20 +499,23 @@ async def satellite_search(
         "limit": 20,
     }
 
-    # Add cloud-cover filtering only when needed.
-    # CQL2 text is supported by the Catalog Filter
-    # extension.
+    # Use the STAC Query extension for POST requests.
+    # The current CDSE STAC endpoint expects JSON query
+    # expressions for POST requests; sending CQL2 text as
+    # the `filter` field can result in HTTP 400.
     if max_cloud_cover < 100:
 
-        search_payload["filter"] = (
-            "eo:cloud_cover <= "
-            f"{max_cloud_cover}"
-        )
+        search_payload["query"] = {
+            "eo:cloud_cover": {
+                "lte": max_cloud_cover
+            }
+        }
 
     headers = {
-    "Authorization": f"Bearer {access_token}",
-    "Content-Type": "application/json",
-}
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
     # --------------------------------------------------------
     # CALL CATALOG API
@@ -552,7 +565,7 @@ async def satellite_search(
 
                 json=search_payload,
 
-                timeout=60,
+                timeout=30,
             )
 
             print(
@@ -4081,6 +4094,9 @@ Short Conclusion
         }
 
 # ============================================================
+
+
+# ============================================================
 # PHASE 8A — MULTI-TEMPORAL SENTINEL-2 SCENE RETRIEVAL
 # ============================================================
 
@@ -4092,187 +4108,525 @@ async def multi_temporal_scenes(
     north: float = Form(...),
     start_year: int = Form(...),
     end_year: int = Form(...),
-    target_month: int = Form(1),
-    target_day: int = Form(1),
-    window_days: int = Form(30),
-    max_cloud_cover: float = Form(30),
+    target_month: int = Form(6),
+    target_day: int = Form(15),
+    window_days: int = Form(180),
+    max_cloud_cover: float = Form(100),
 ):
-    """Retrieve one representative Sentinel-2 L2A scene per year for the same AOI."""
-    global CDSE_ACCESS_TOKEN, CDSE_TOKEN_EXPIRES_AT
+    """
+    Phase 8A only:
+    Retrieve one representative Sentinel-2 L2A scene per year
+    for the same requested AOI.
+
+    This stage returns metadata only. No NDVI/NDWI/NDBI
+    temporal processing is performed here.
+    """
+    global CDSE_ACCESS_TOKEN
+    global CDSE_TOKEN_EXPIRES_AT
+
     from datetime import date, datetime, timedelta
 
+    # --------------------------------------------------------
+    # VALIDATE INPUT
+    # --------------------------------------------------------
+
     try:
-        west, south, east, north = map(float, (west, south, east, north))
-        start_year, end_year = int(start_year), int(end_year)
-        target_month, target_day = int(target_month), int(target_day)
+        west = float(west)
+        south = float(south)
+        east = float(east)
+        north = float(north)
+
+        start_year = int(start_year)
+        end_year = int(end_year)
+
+        target_month = int(target_month)
+        target_day = int(target_day)
+
         window_days = int(window_days)
         max_cloud_cover = float(max_cloud_cover)
-    except (TypeError, ValueError):
-        return {"success": False, "error": "Invalid multi-temporal parameters."}
 
-    if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
-        return {"success": False, "error": "Coordinates are outside valid WGS84 limits."}
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "error": "Invalid Phase 8A parameters.",
+        }
+
+    if not (
+        -180 <= west <= 180
+        and -180 <= east <= 180
+        and -90 <= south <= 90
+        and -90 <= north <= 90
+    ):
+        return {
+            "success": False,
+            "error": "Coordinates are outside valid WGS84 limits.",
+        }
+
     if west >= east:
-        return {"success": False, "error": "West must be less than East."}
+        return {
+            "success": False,
+            "error": "West must be less than East.",
+        }
+
     if south >= north:
-        return {"success": False, "error": "South must be less than North."}
+        return {
+            "success": False,
+            "error": "South must be less than North.",
+        }
+
     if start_year < 2015 or end_year < 2015:
-        return {"success": False, "error": "Year must be 2015 or later for Sentinel-2 analysis."}
+        return {
+            "success": False,
+            "error": "Sentinel-2 analysis requires year 2015 or later.",
+        }
+
     if start_year > end_year:
-        return {"success": False, "error": "Start year cannot be later than end year."}
+        return {
+            "success": False,
+            "error": "Start year cannot be later than end year.",
+        }
+
     if end_year - start_year > 10:
-        return {"success": False, "error": "Maximum temporal range is 10 years."}
-    if not 1 <= target_month <= 12 or not 1 <= target_day <= 31:
-        return {"success": False, "error": "Target month/day is invalid."}
+        return {
+            "success": False,
+            "error": "Maximum temporal range is 10 years.",
+        }
+
+    if not 1 <= target_month <= 12:
+        return {
+            "success": False,
+            "error": "Target month must be between 1 and 12.",
+        }
+
+    if not 1 <= target_day <= 31:
+        return {
+            "success": False,
+            "error": "Target day must be between 1 and 31.",
+        }
+
     if not 0 <= window_days <= 180:
-        return {"success": False, "error": "Window must be between 0 and 180 days."}
+        return {
+            "success": False,
+            "error": "Search window must be between 0 and 180 days.",
+        }
+
     if not 0 <= max_cloud_cover <= 100:
-        return {"success": False, "error": "Cloud cover must be between 0 and 100."}
+        return {
+            "success": False,
+            "error": "Cloud cover must be between 0 and 100.",
+        }
+
+    # Validate the month/day combination using a non-leap year.
     try:
-        date(2020, target_month, target_day)
+        date(2021, target_month, target_day)
     except ValueError:
-        return {"success": False, "error": "Invalid target month/day combination."}
+        return {
+            "success": False,
+            "error": "Invalid target month/day combination.",
+        }
+
+    # --------------------------------------------------------
+    # AUTHENTICATION
+    # --------------------------------------------------------
 
     try:
         access_token = get_cdse_access_token()
-    except Exception as exc:
-        return {"success": False, "error": "Unable to authenticate with Copernicus Data Space.", "details": str(exc)}
 
-    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json", "Accept": "application/json"}
+    except Exception as exc:
+        print("PHASE 8A AUTH ERROR:", str(exc))
+
+        return {
+            "success": False,
+            "error": (
+                "Unable to authenticate with "
+                "Copernicus Data Space."
+            ),
+            "details": str(exc),
+        }
+
+    # Keep this request deliberately simple.
+    # The official Sentinel Hub Catalog POST example uses:
+    # bbox + datetime + collections + limit.
+    # We apply the cloud threshold locally after retrieval.
+    #
+    # This avoids the previous Phase 8A request-format problem
+    # and makes the first Phase 8A test independent of optional
+    # Catalog filtering extensions.
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
     scenes_by_year = []
     missing_years = []
+    errors = []
 
-    for year in range(start_year, end_year + 1):
-        center = date(year, target_month, min(target_day, 28) if target_month == 2 and target_day == 29 else target_day)
-        year_start = max(date(year, 1, 1), center - timedelta(days=window_days))
-        year_end = min(date(year, 12, 31), center + timedelta(days=window_days))
-        # Use the Query extension for cloud cover instead of relying on
-        # free-form CQL2 text. CDSE documents this POST form explicitly.
-        # We also keep a no-filter fallback if the filtered query returns no
-        # items, so a valid AOI is not reported as a false "no scenes" case.
+    # --------------------------------------------------------
+    # SEARCH YEARS IN PARALLEL
+    # --------------------------------------------------------
+    #
+    # The previous implementation queried 5 years sequentially.
+    # If the CDSE service takes ~20-30 seconds for one request,
+    # the UI could appear stuck for 2+ minutes.  Phase 8A only
+    # needs metadata, so run the independent yearly searches in
+    # parallel and keep each request bounded by a short timeout.
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def search_one_year(year):
+        """Search and select one representative scene for one year."""
+
+        # February 29 is only valid in leap years.
+        if target_month == 2 and target_day == 29:
+            if year % 4 == 0 and (
+                year % 100 != 0 or year % 400 == 0
+            ):
+                center = date(year, 2, 29)
+            else:
+                center = date(year, 2, 28)
+        else:
+            try:
+                center = date(year, target_month, target_day)
+            except ValueError:
+                center = date(year, target_month, 28)
+
+        year_start = max(
+            date(year, 1, 1),
+            center - timedelta(days=window_days),
+        )
+        year_end = min(
+            date(year, 12, 31),
+            center + timedelta(days=window_days),
+        )
+
         payload = {
             "collections": ["sentinel-2-l2a"],
-            "datetime": f"{year_start.isoformat()}T00:00:00Z/{year_end.isoformat()}T23:59:59Z",
+            "datetime": (
+                f"{year_start.isoformat()}T00:00:00Z/"
+                f"{year_end.isoformat()}T23:59:59Z"
+            ),
             "bbox": [west, south, east, north],
-            "limit": 100,
+            "limit": 10,
+            "fields": {
+                "exclude": ["assets", "links", "geometry"],
+            },
         }
-        if max_cloud_cover < 100:
-            payload["query"] = {
-                "eo:cloud_cover": {"lte": max_cloud_cover}
-            }
 
         try:
-            response = requests.post(CDSE_CATALOG_URL, headers=headers, json=payload, timeout=60)
+            response = requests.post(
+                CDSE_CATALOG_URL,
+                headers=headers,
+                json=payload,
+                timeout=15,
+            )
+
+            print(
+                "PHASE 8A CATALOG STATUS:",
+                year,
+                response.status_code,
+            )
+
+            # Retry once if the cached OAuth token expired.
             if response.status_code == 401:
+                global CDSE_ACCESS_TOKEN
+                global CDSE_TOKEN_EXPIRES_AT
+
                 CDSE_ACCESS_TOKEN = None
                 CDSE_TOKEN_EXPIRES_AT = 0
-                access_token = get_cdse_access_token()
-                headers["Authorization"] = f"Bearer {access_token}"
-                response = requests.post(CDSE_CATALOG_URL, headers=headers, json=payload, timeout=60)
+
+                refreshed_token = get_cdse_access_token()
+                retry_headers = dict(headers)
+                retry_headers["Authorization"] = (
+                    f"Bearer {refreshed_token}"
+                )
+
+                response = requests.post(
+                    CDSE_CATALOG_URL,
+                    headers=retry_headers,
+                    json=payload,
+                    timeout=15,
+                )
+
+                print(
+                    "PHASE 8A CATALOG RETRY STATUS:",
+                    year,
+                    response.status_code,
+                )
 
             if response.status_code != 200:
-                error_text = response.text[:500]
-                print("MULTI-TEMPORAL CATALOG ERROR:", year, response.status_code, error_text)
-                missing_years.append(year)
-                continue
+                try:
+                    details = response.json()
+                except Exception:
+                    details = response.text[:1000]
 
-            body = response.json()
-            features = body.get("features") or []
-
-            # If cloud filtering produces no result, retry the exact same
-            # AOI/date search without the cloud constraint. This helps us
-            # distinguish "there is no imagery" from an overly restrictive
-            # cloud filter and still lets the frontend show the best scene.
-            if not features and max_cloud_cover < 100:
-                fallback_payload = {
-                    "collections": ["sentinel-2-l2a"],
-                    "datetime": f"{year_start.isoformat()}T00:00:00Z/{year_end.isoformat()}T23:59:59Z",
-                    "bbox": [west, south, east, north],
-                    "limit": 100,
+                return {
+                    "year": year,
+                    "scene": None,
+                    "error": {
+                        "year": year,
+                        "status_code": response.status_code,
+                        "details": details,
+                    },
                 }
-                fallback_response = requests.post(
-                    CDSE_CATALOG_URL,
-                    headers=headers,
-                    json=fallback_payload,
-                    timeout=60,
+
+            try:
+                data = response.json()
+            except ValueError as exc:
+                return {
+                    "year": year,
+                    "scene": None,
+                    "error": {
+                        "year": year,
+                        "status_code": response.status_code,
+                        "details": (
+                            "Invalid JSON returned by Catalog: "
+                            + str(exc)
+                        ),
+                    },
+                }
+
+            features = data.get("features") or []
+            candidates = []
+
+            for item in features:
+                try:
+                    scene = format_satellite_scene(item)
+
+                    try:
+                        cloud = float(
+                            scene.get("cloud_cover")
+                        )
+                    except (TypeError, ValueError):
+                        cloud = 999.0
+
+                    if cloud > max_cloud_cover:
+                        continue
+
+                    acquisition = (
+                        scene.get("acquisition_date") or ""
+                    )
+
+                    try:
+                        acquisition_date = datetime.fromisoformat(
+                            acquisition.replace("Z", "+00:00")
+                        ).date()
+                        day_distance = abs(
+                            (acquisition_date - center).days
+                        )
+                    except Exception:
+                        day_distance = 999999
+
+                    candidates.append({
+                        "cloud": cloud,
+                        "day_distance": day_distance,
+                        "acquisition": acquisition,
+                        "scene": scene,
+                    })
+
+                except Exception as exc:
+                    print(
+                        "PHASE 8A SCENE FORMAT ERROR:",
+                        year,
+                        str(exc),
+                    )
+
+            if not candidates:
+                return {
+                    "year": year,
+                    "scene": None,
+                    "error": None,
+                }
+
+            candidates.sort(
+                key=lambda item: (
+                    item["cloud"],
+                    item["day_distance"],
+                    item["acquisition"],
                 )
-                if fallback_response.status_code == 200:
-                    fallback_body = fallback_response.json()
-                    features = fallback_body.get("features") or []
-                    if features:
-                        # The scene selection below still respects the user's
-                        # cloud threshold by filtering candidates explicitly.
-                        filtered_features = []
-                        for feature in features:
-                            try:
-                                cloud_value = float(
-                                    feature.get("properties", {}).get("eo:cloud_cover")
-                                )
-                                if cloud_value <= max_cloud_cover:
-                                    filtered_features.append(feature)
-                            except (TypeError, ValueError):
-                                continue
-                        features = filtered_features
+            )
+
+            selected = candidates[0]["scene"]
+            selected["analysis_year"] = year
+            selected["target_date"] = center.isoformat()
+            selected["search_start"] = year_start.isoformat()
+            selected["search_end"] = year_end.isoformat()
+
+            return {
+                "year": year,
+                "scene": selected,
+                "error": None,
+            }
+
+        except requests.RequestException as exc:
+            print(
+                "PHASE 8A REQUEST ERROR:",
+                year,
+                str(exc),
+            )
+            return {
+                "year": year,
+                "scene": None,
+                "error": {
+                    "year": year,
+                    "status_code": None,
+                    "details": str(exc),
+                },
+            }
 
         except Exception as exc:
-            print("MULTI-TEMPORAL SEARCH ERROR:", year, str(exc))
+            print(
+                "PHASE 8A UNEXPECTED ERROR:",
+                year,
+                str(exc),
+            )
+            return {
+                "year": year,
+                "scene": None,
+                "error": {
+                    "year": year,
+                    "status_code": None,
+                    "details": str(exc),
+                },
+            }
+
+    requested_years = list(range(start_year, end_year + 1))
+    yearly_results = []
+
+    with ThreadPoolExecutor(
+        max_workers=min(5, len(requested_years))
+    ) as executor:
+        futures = [
+            executor.submit(search_one_year, year)
+            for year in requested_years
+        ]
+
+        for future in as_completed(futures):
+            yearly_results.append(future.result())
+
+    yearly_results.sort(key=lambda item: item["year"])
+
+    for result in yearly_results:
+        year = result["year"]
+        scene = result.get("scene")
+        error = result.get("error")
+
+        if scene is not None:
+            scenes_by_year.append(scene)
+        else:
             missing_years.append(year)
-            continue
 
-        candidates = []
-        for item in features:
-            try:
-                scene = format_satellite_scene(item)
-                acquisition = scene.get("acquisition_date") or ""
-                try:
-                    acq_date = datetime.fromisoformat(acquisition.replace("Z", "+00:00")).date()
-                    day_distance = abs((acq_date - center).days)
-                except Exception:
-                    day_distance = 999999
-                try:
-                    cloud = float(scene.get("cloud_cover"))
-                except (TypeError, ValueError):
-                    cloud = 999.0
-                candidates.append((cloud, day_distance, acquisition, scene))
-            except Exception as exc:
-                print("MULTI-TEMPORAL SCENE FORMAT ERROR:", str(exc))
+        if error is not None:
+            errors.append(error)
 
-        if not candidates:
-            missing_years.append(year)
-            continue
+    # --------------------------------------------------------
+    # SORT RESULTS
+    # --------------------------------------------------------
 
-        # Lowest cloud cover first; closest to target date breaks ties.
-        candidates.sort(key=lambda x: (x[0], x[1], x[2]), reverse=False)
-        selected = candidates[0][3]
-        selected["analysis_year"] = year
-        selected["target_date"] = center.isoformat()
-        selected["search_start"] = year_start.isoformat()
-        selected["search_end"] = year_end.isoformat()
-        scenes_by_year.append(selected)
+    scenes_by_year.sort(
+        key=lambda scene: (
+            scene.get(
+                "analysis_year"
+            )
+            or 0
+        )
+    )
 
-    scenes_by_year.sort(key=lambda s: s["analysis_year"])
+    # --------------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------------
+
     return {
+
         "success": True,
-        "module": "Multi-Temporal Scene Retrieval",
-        "phase": "8A",
-        "collection": "sentinel-2-l2a",
-        "requested_years": list(range(start_year, end_year + 1)),
-        "retrieved_years": [s["analysis_year"] for s in scenes_by_year],
-        "missing_years": missing_years,
-        "count": len(scenes_by_year),
-        "same_aoi": True,
+
+        "module":
+            "Multi-Temporal Scene Retrieval",
+
+        "phase":
+            "8A",
+
+        "collection":
+            "sentinel-2-l2a",
+
+        "requested_years":
+            list(
+                range(
+                    start_year,
+                    end_year + 1,
+                )
+            ),
+
+        "retrieved_years":
+            [
+                scene[
+                    "analysis_year"
+                ]
+                for scene
+                in scenes_by_year
+            ],
+
+        "missing_years":
+            missing_years,
+
+        "count":
+            len(
+                scenes_by_year
+            ),
+
+        "same_aoi":
+            True,
+
         "query": {
-            "bbox": [west, south, east, north],
-            "start_year": start_year,
-            "end_year": end_year,
-            "target_month": target_month,
-            "target_day": target_day,
-            "window_days": window_days,
-            "max_cloud_cover": max_cloud_cover,
+
+            "bbox": [
+                west,
+                south,
+                east,
+                north,
+            ],
+
+            "start_year":
+                start_year,
+
+            "end_year":
+                end_year,
+
+            "target_month":
+                target_month,
+
+            "target_day":
+                target_day,
+
+            "window_days":
+                window_days,
+
+            "max_cloud_cover":
+                max_cloud_cover,
         },
-        "selection_rule": "One scene per year: lowest cloud cover, then closest acquisition date to the target date.",
-        "scenes": scenes_by_year,
-        "note": "Phase 8A retrieves scene metadata only. NDVI, NDWI and NDBI temporal calculations are added in later Phase 8 stages.",
+
+        "selection_rule": (
+            "One scene per year: lowest "
+            "cloud cover, then closest "
+            "acquisition date to the "
+            "target date."
+        ),
+
+        "scenes":
+            scenes_by_year,
+
+        "errors":
+            errors,
+
+        "note": (
+            "Phase 8A retrieves "
+            "Sentinel-2 scene metadata "
+            "only. NDVI, NDWI, NDBI "
+            "and temporal trend "
+            "calculations are added "
+            "in later Phase 8 stages."
+        ),
     }
 
 
@@ -5499,365 +5853,565 @@ Important:
         }
 
 
+
+
+
 # ============================================================
-# PHASE 8B — SAME AOI VALIDATION ACROSS YEARS
+# PHASE 8 — UNIFIED MULTI-TEMPORAL SPECTRAL ANALYSIS
 # ============================================================
 
-def _normalise_bbox(value):
-    """Return [west, south, east, north] when a valid bbox is supplied."""
-    try:
-        if not isinstance(value, (list, tuple)) or len(value) < 4:
-            return None
-        west, south, east, north = [float(value[i]) for i in range(4)]
-        if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
-            return None
-        if west >= east or south >= north:
-            return None
-        return [west, south, east, north]
-    except (TypeError, ValueError):
-        return None
-
-
-def _bbox_intersection(a, b):
-    """Return intersection bbox or None."""
-    west = max(a[0], b[0])
-    south = max(a[1], b[1])
-    east = min(a[2], b[2])
-    north = min(a[3], b[3])
-    if west >= east or south >= north:
-        return None
-    return [west, south, east, north]
-
-
-def _bbox_area(b):
-    """Simple degree-space area used only for coverage validation."""
-    return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
-
-
-@app.post("/api/multi-temporal-validate-aoi")
-async def multi_temporal_validate_aoi(
+@app.post("/api/multi-temporal-indices")
+async def multi_temporal_indices(
     west: float = Form(...),
     south: float = Form(...),
     east: float = Form(...),
     north: float = Form(...),
     scenes_json: str = Form(...),
+    indices_json: str = Form(...),
 ):
     """
-    Validate that every retrieved multi-temporal scene covers the requested AOI.
+    Unified Phase 8 temporal analysis.
 
-    This is a spatial/bbox consistency check. It does not claim pixel-level
-    registration or exact geospatial equivalence between different dates.
+    The user selects any combination of NDVI, NDWI and NDBI. Only the
+    selected indices are calculated. One Process API request is made per
+    temporal scene, with requests processed concurrently in a small pool.
+
+    AOI coverage is checked automatically here; there is no separate
+    user-facing AOI validation step.
     """
-    import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def normalize_bbox(value):
+        try:
+            values = [float(item) for item in value]
+        except (TypeError, ValueError):
+            return None
+        if len(values) != 4:
+            return None
+        west_v, south_v, east_v, north_v = values
+        if not (-180 <= west_v <= 180 and -180 <= east_v <= 180 and -90 <= south_v <= 90 and -90 <= north_v <= 90):
+            return None
+        if west_v >= east_v or south_v >= north_v:
+            return None
+        return [west_v, south_v, east_v, north_v]
 
     try:
-        aoi = _normalise_bbox([west, south, east, north])
+        aoi = normalize_bbox([west, south, east, north])
         if not aoi:
             return {"success": False, "error": "Invalid AOI coordinates."}
-
-        try:
-            scenes = json.loads(scenes_json)
-        except (TypeError, ValueError):
-            return {"success": False, "error": "scenes_json must contain valid JSON."}
-
-        if not isinstance(scenes, list):
-            return {"success": False, "error": "scenes_json must be a JSON array of scenes."}
-
-        validated = []
-        invalid_years = []
-        missing_bbox_years = []
-
-        for index, scene in enumerate(scenes):
-            if not isinstance(scene, dict):
-                invalid_years.append(f"item-{index + 1}")
-                continue
-
-            year = scene.get("analysis_year")
-            try:
-                year_key = int(year)
-            except (TypeError, ValueError):
-                year_key = year if year is not None else f"item-{index + 1}"
-
-            scene_bbox = _normalise_bbox(scene.get("bbox"))
-
-            # Some STAC responses can expose geometry even when bbox is absent.
-            # For Phase 8B we deliberately require the catalogue bbox so that
-            # the validation remains deterministic and does not pretend to do
-            # exact polygon geospatial calculations.
-            if not scene_bbox:
-                missing_bbox_years.append(year_key)
-                validated.append({
-                    "analysis_year": year_key,
-                    "scene_id": scene.get("id"),
-                    "valid": False,
-                    "reason": "Scene bbox is missing or invalid.",
-                    "coverage_percentage": 0.0,
-                })
-                continue
-
-            intersection = _bbox_intersection(aoi, scene_bbox)
-            aoi_area = _bbox_area(aoi)
-            intersection_area = _bbox_area(intersection) if intersection else 0.0
-            coverage = (intersection_area / aoi_area * 100.0) if aoi_area > 0 else 0.0
-
-            # A scene is accepted only when its bbox fully contains the AOI.
-            fully_covers = (
-                scene_bbox[0] <= aoi[0]
-                and scene_bbox[1] <= aoi[1]
-                and scene_bbox[2] >= aoi[2]
-                and scene_bbox[3] >= aoi[3]
-            )
-
-            valid = bool(fully_covers and coverage >= 99.999)
-            reason = (
-                "Scene bbox fully covers the requested AOI."
-                if valid
-                else "Scene bbox does not fully cover the requested AOI."
-            )
-
-            validated.append({
-                "analysis_year": year_key,
-                "scene_id": scene.get("id"),
-                "acquisition_date": scene.get("acquisition_date"),
-                "scene_bbox": scene_bbox,
-                "valid": valid,
-                "fully_covers_aoi": fully_covers,
-                "coverage_percentage": round(min(100.0, coverage), 3),
-                "reason": reason,
-            })
-
-            if not valid:
-                invalid_years.append(year_key)
-
-        validated.sort(key=lambda item: str(item.get("analysis_year")))
-        valid_years = [item["analysis_year"] for item in validated if item.get("valid")]
-        all_valid = bool(scenes) and len(valid_years) == len(scenes) and not invalid_years
-
-        return {
-            "success": True,
-            "module": "Multi-Temporal Same AOI Validation",
-            "phase": "8B",
-            "same_aoi": all_valid,
-            "aoi": aoi,
-            "scene_count": len(scenes),
-            "valid_count": len(valid_years),
-            "invalid_count": len(scenes) - len(valid_years),
-            "valid_years": valid_years,
-            "invalid_years": invalid_years,
-            "missing_bbox_years": missing_bbox_years,
-            "validation_method": "Requested AOI bbox must be fully contained by each Sentinel-2 scene bbox.",
-            "note": "Phase 8B validates spatial AOI coverage only; it is not pixel-level registration or exact geospatial co-registration.",
-            "results": validated,
-        }
-
-
-    except Exception as exc:
-        print("MULTI-TEMPORAL AOI VALIDATION ERROR:", str(exc))
-        return {
-            "success": False,
-            "error": "Unexpected same-AOI validation error.",
-            "details": str(exc),
-        }
-
-# ============================================================
-# PHASE 8C — MULTI-TEMPORAL NDVI
-# ============================================================
-
-@app.post("/api/multi-temporal-ndvi")
-async def multi_temporal_ndvi(
-    west: float = Form(...),
-    south: float = Form(...),
-    east: float = Form(...),
-    north: float = Form(...),
-    scenes_json: str = Form(...),
-):
-    """Calculate year-wise NDVI for the validated same-AOI Sentinel-2 scenes."""
-    global CDSE_ACCESS_TOKEN, CDSE_TOKEN_EXPIRES_AT
-    from datetime import datetime
-
-    try:
-        west, south, east, north = map(float, (west, south, east, north))
-    except (TypeError, ValueError):
-        return {"success": False, "error": "Invalid AOI coordinates."}
-
-    if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
-        return {"success": False, "error": "Coordinates are outside valid WGS84 limits."}
-    if west >= east or south >= north:
-        return {"success": False, "error": "Invalid AOI: west < east and south < north are required."}
-
-    try:
         scenes = json.loads(scenes_json)
+        indices = json.loads(indices_json)
     except (TypeError, ValueError, json.JSONDecodeError):
-        return {"success": False, "error": "scenes_json must contain valid JSON."}
+        return {"success": False, "error": "Invalid scenes or index selection JSON."}
 
     if not isinstance(scenes, list) or not scenes:
-        return {"success": False, "error": "At least one scene is required."}
+        return {"success": False, "error": "Retrieve multi-year scenes first."}
     if len(scenes) > 10:
         return {"success": False, "error": "Maximum of 10 temporal scenes is supported."}
+
+    allowed = {"NDVI", "NDWI", "NDBI"}
+    if not isinstance(indices, list):
+        return {"success": False, "error": "Index selection must be a list."}
+    selected = [item for item in ["NDVI", "NDWI", "NDBI"] if item in indices and item in allowed]
+    if not selected:
+        return {"success": False, "error": "Select at least one index: NDVI, NDWI or NDBI."}
+
+    # Automatic AOI coverage validation.
+    invalid_years = []
+    validation = []
+    for scene in scenes:
+        year = scene.get("analysis_year") if isinstance(scene, dict) else None
+        scene_bbox = normalize_bbox(scene.get("bbox")) if isinstance(scene, dict) else None
+        valid = bool(
+            scene_bbox
+            and scene_bbox[0] <= aoi[0]
+            and scene_bbox[1] <= aoi[1]
+            and scene_bbox[2] >= aoi[2]
+            and scene_bbox[3] >= aoi[3]
+        )
+        validation.append({"year": year, "valid": valid})
+        if not valid and year is not None:
+            invalid_years.append(int(year))
+
+    if invalid_years:
+        return {
+            "success": False,
+            "error": "One or more retrieved scenes do not fully cover the selected AOI.",
+            "aoi_validation": {
+                "same_aoi": False,
+                "valid_years": [item["year"] for item in validation if item["valid"]],
+                "invalid_years": invalid_years,
+                "results": validation,
+            },
+        }
 
     try:
         access_token = get_cdse_access_token()
     except Exception as exc:
-        return {"success": False, "error": "Unable to authenticate with Copernicus Data Space.", "details": str(exc)}
+        print("PHASE 8 UNIFIED AUTH ERROR:", str(exc))
+        return {
+            "success": False,
+            "error": "Unable to authenticate with Copernicus Data Space.",
+            "details": str(exc),
+        }
 
-    evalscript = """
-//VERSION=3
-function setup() {
-  return {
-    input: ["B04", "B08", "SCL"],
-    output: { bands: 1, sampleType: "FLOAT32" }
-  };
-}
-function evaluatePixel(sample) {
-  if (sample.SCL === 3 || sample.SCL === 8 || sample.SCL === 9 || sample.SCL === 10 || sample.SCL === 11) {
-    return [-9999];
-  }
-  var red = sample.B04;
-  var nir = sample.B08;
-  var denominator = nir + red;
-  if (denominator === 0) return [-9999];
-  return [(nir - red) / denominator];
-}
-"""
+    # Build only the spectral inputs and output bands needed by the user.
+    needed_bands = ["B08"]
+    if "NDVI" in selected:
+        needed_bands.append("B04")
+    if "NDWI" in selected:
+        needed_bands.append("B03")
+    if "NDBI" in selected:
+        needed_bands.append("B11")
+    needed_bands.append("SCL")
 
-    results = []
-    failed_years = []
+    input_literal = ", ".join(f'"{band}"' for band in needed_bands)
+    output_count = len(selected)
 
-    for scene in scenes:
-        if not isinstance(scene, dict):
-            failed_years.append(None)
-            continue
+    eval_lines = [
+        "//VERSION=3",
+        "function setup() {",
+        "  return {",
+        f"    input: [{input_literal}],",
+        f"    output: {{ bands: {output_count}, sampleType: \"FLOAT32\" }}",
+        "  };",
+        "}",
+        "function evaluatePixel(sample) {",
+        "  if (sample.SCL === 3 || sample.SCL === 8 || sample.SCL === 9 || sample.SCL === 10 || sample.SCL === 11) {",
+        f"    return [{', '.join(['-9999'] * output_count)}];",
+        "  }",
+    ]
 
-        year = scene.get("analysis_year")
-        acquisition = str(scene.get("acquisition_date") or "")[:10]
-        if year is None:
-            try:
-                year = int(acquisition[:4])
-            except Exception:
-                year = None
+    for index in selected:
+        if index == "NDVI":
+            eval_lines.append("  var ndvi = (sample.B08 + sample.B04) === 0 ? -9999 : (sample.B08 - sample.B04) / (sample.B08 + sample.B04);")
+        elif index == "NDWI":
+            eval_lines.append("  var ndwi = (sample.B03 + sample.B08) === 0 ? -9999 : (sample.B03 - sample.B08) / (sample.B03 + sample.B08);")
+        elif index == "NDBI":
+            eval_lines.append("  var ndbi = (sample.B11 + sample.B08) === 0 ? -9999 : (sample.B11 - sample.B08) / (sample.B11 + sample.B08);")
 
-        if not acquisition:
-            failed_years.append(year)
-            continue
+    eval_lines.append(f"  return [{', '.join(index.lower() for index in selected)}];")
+    eval_lines.extend(["}", ""])
+    evalscript = "\n".join(eval_lines)
 
-        try:
-            datetime.strptime(acquisition, "%Y-%m-%d")
-        except ValueError:
-            failed_years.append(year)
-            continue
+    ordered_scenes = sorted(
+        scenes,
+        key=lambda item: int(item.get("analysis_year") or 0),
+    )
+
+    def process_scene(scene):
+        year = int(scene.get("analysis_year"))
+        date_only = str(scene.get("acquisition_date") or scene.get("date") or "")[:10]
+        if not date_only:
+            return None, year, "Missing acquisition date."
 
         request_body = {
             "input": {
                 "bounds": {
-                    "bbox": [west, south, east, north],
+                    "bbox": aoi,
                     "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"},
                 },
                 "data": [{
                     "type": "sentinel-2-l2a",
                     "dataFilter": {
                         "timeRange": {
-                            "from": f"{acquisition}T00:00:00Z",
-                            "to": f"{acquisition}T23:59:59Z",
+                            "from": f"{date_only}T00:00:00Z",
+                            "to": f"{date_only}T23:59:59Z",
                         },
                         "mosaickingOrder": "leastCC",
                     },
                 }],
             },
             "output": {
-                "width": 768,
-                "height": 768,
+                "width": 512,
+                "height": 512,
                 "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}],
             },
             "evalscript": evalscript,
         }
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "Accept": "image/tiff",
-        }
-
         try:
-            response = requests.post(CDSE_PROCESS_URL, headers=headers, json=request_body, timeout=180)
+            response = None
+            for attempt in range(3):
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "image/tiff",
+                }
+                response = requests.post(
+                    CDSE_PROCESS_URL,
+                    headers=headers,
+                    json=request_body,
+                    timeout=120,
+                )
+                print("PHASE 8 UNIFIED STATUS:", year, "attempt", attempt + 1, response.status_code)
 
-            if response.status_code == 401:
-                CDSE_ACCESS_TOKEN = None
-                CDSE_TOKEN_EXPIRES_AT = 0
-                access_token = get_cdse_access_token()
-                headers["Authorization"] = f"Bearer {access_token}"
-                response = requests.post(CDSE_PROCESS_URL, headers=headers, json=request_body, timeout=180)
+                if response.status_code == 401:
+                    try:
+                        refreshed_token = get_cdse_access_token()
+                        headers["Authorization"] = f"Bearer {refreshed_token}"
+                        response = requests.post(
+                            CDSE_PROCESS_URL,
+                            headers=headers,
+                            json=request_body,
+                            timeout=120,
+                        )
+                        print("PHASE 8 UNIFIED TOKEN-RETRY STATUS:", year, response.status_code)
+                    except Exception as token_exc:
+                        return None, year, f"Token refresh failed: {token_exc}"
 
-            if response.status_code != 200:
-                print("MULTI-TEMPORAL NDVI STATUS:", year, response.status_code)
-                failed_years.append(year)
-                continue
+                if response.status_code == 200 and response.content:
+                    break
 
-            ndvi_image = Image.open(io.BytesIO(response.content))
-            ndvi_array = np.array(ndvi_image, dtype=np.float32)
+                if response.status_code in (429, 500, 502, 503, 504):
+                    import time
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                break
 
-            valid_mask = (
-                np.isfinite(ndvi_array)
-                & (ndvi_array > -1.0)
-                & (ndvi_array <= 1.0)
-            )
-            valid_values = ndvi_array[valid_mask]
+            if response is None:
+                return None, year, "No Process API response."
+            if response.status_code != 200 or not response.content:
+                try:
+                    preview = response.text[:400]
+                except Exception:
+                    preview = ""
+                return None, year, f"Process API HTTP {response.status_code}: {preview}"
 
-            if valid_values.size == 0:
-                failed_years.append(year)
-                continue
+            raw = response.content
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            tiff_magic = raw[:4] in (b"II*\x00", b"MM\x00*")
+            if not (content_type.startswith("image/") or tiff_magic):
+                try:
+                    preview = response.text[:400]
+                except Exception:
+                    preview = "<unable to decode response body>"
+                return None, year, f"Process API returned {content_type or 'unknown'}: {preview}"
 
-            mean_ndvi = float(np.mean(valid_values))
-            min_ndvi = float(np.min(valid_values))
-            max_ndvi = float(np.max(valid_values))
-            vegetation_percentage = float(np.mean(valid_values > 0.20) * 100.0)
+            # CDSE Process API returns a GeoTIFF. Some valid FLOAT32/GeoTIFF
+            # responses cannot be decoded by Pillow, so use TIFF-aware decoders
+            # first and keep Pillow only as a fallback.
+            array = None
+            decode_errors = []
 
-            if mean_ndvi >= 0.60:
-                health = "Excellent"
-            elif mean_ndvi >= 0.40:
-                health = "Healthy"
-            elif mean_ndvi >= 0.20:
-                health = "Moderate"
-            elif mean_ndvi >= 0.00:
-                health = "Sparse"
-            else:
-                health = "Very Low"
+            if rasterio is not None:
+                try:
+                    with rasterio.io.MemoryFile(raw) as memfile:
+                        with memfile.open() as dataset:
+                            array = dataset.read().astype(np.float32)
+                            # rasterio returns (bands, height, width); convert to
+                            # the frontend/statistics convention (height, width, bands).
+                            if array.ndim == 3:
+                                array = np.moveaxis(array, 0, -1)
+                except Exception as image_exc:
+                    decode_errors.append(f"rasterio: {image_exc}")
 
-            result = {
-                "analysis_year": int(year) if year is not None else None,
-                "date": acquisition,
-                "mean_ndvi": round(mean_ndvi, 4),
-                "min_ndvi": round(min_ndvi, 4),
-                "max_ndvi": round(max_ndvi, 4),
-                "vegetation_percentage": round(vegetation_percentage, 2),
-                "vegetation_health": health,
-                "valid_pixels": int(valid_values.size),
+            if array is None and tifffile is not None:
+                try:
+                    array = np.asarray(tifffile.imread(io.BytesIO(raw)), dtype=np.float32)
+                    if array.ndim == 3 and array.shape[0] == output_count and array.shape[-1] != output_count:
+                        array = np.moveaxis(array, 0, -1)
+                except Exception as image_exc:
+                    decode_errors.append(f"tifffile: {image_exc}")
+
+            if array is None:
+                try:
+                    with Image.open(io.BytesIO(raw)) as image:
+                        array = np.array(image, dtype=np.float32)
+                        if array.ndim == 2:
+                            array = array[:, :, np.newaxis]
+                except Exception as image_exc:
+                    decode_errors.append(f"Pillow: {image_exc}")
+
+            if array is None:
+                return None, year, (
+                    "Unable to decode Process API image. "
+                    + " | ".join(decode_errors)
+                )
+
+            if output_count == 1 and array.ndim == 2:
+                array = array[:, :, np.newaxis]
+            if array.ndim != 3 or array.shape[-1] < output_count:
+                return None, year, f"Expected {output_count}-band output, received shape {array.shape}"
+
+            row = {
+                "analysis_year": year,
+                "date": date_only,
+                "scene_id": scene.get("id"),
             }
-            results.append(result)
+
+            def metric_stats(values):
+                valid = np.isfinite(values) & (values > -1.0) & (values <= 1.0)
+                vals = values[valid]
+                if vals.size == 0:
+                    return None
+                return {
+                    "mean": round(float(np.mean(vals)), 4),
+                    "min": round(float(np.min(vals)), 4),
+                    "max": round(float(np.max(vals)), 4),
+                    "percentage": round(float(np.mean(vals > 0.20) * 100.0), 2),
+                    "valid_pixels": int(vals.size),
+                }
+
+            for band_index, index in enumerate(selected):
+                stats = metric_stats(array[:, :, band_index])
+                if stats is None:
+                    continue
+                if index == "NDVI":
+                    row["ndvi"] = {
+                        **stats,
+                        "health": (
+                            "Excellent" if stats["mean"] >= 0.60 else
+                            "Healthy" if stats["mean"] >= 0.40 else
+                            "Moderate" if stats["mean"] >= 0.20 else
+                            "Sparse" if stats["mean"] >= 0.00 else "Very Low"
+                        ),
+                    }
+                elif index == "NDWI":
+                    row["ndwi"] = {
+                        **stats,
+                        "status": (
+                            "High Water Presence" if stats["mean"] >= 0.40 else
+                            "Moderate Water Presence" if stats["mean"] >= 0.20 else
+                            "Low Water Presence" if stats["mean"] >= 0.00 else
+                            "Very Low Water Presence"
+                        ),
+                    }
+                elif index == "NDBI":
+                    row["ndbi"] = {
+                        **stats,
+                        "status": (
+                            "Very High Built-up Intensity" if stats["mean"] >= 0.40 else
+                            "High Built-up Intensity" if stats["mean"] >= 0.20 else
+                            "Moderate Built-up Intensity" if stats["mean"] >= 0.00 else
+                            "Low Built-up Intensity"
+                        ),
+                    }
+
+            return (row if any(key in row for key in ("ndvi", "ndwi", "ndbi")) else None), year, None
 
         except requests.RequestException as exc:
-            print("MULTI-TEMPORAL NDVI REQUEST ERROR:", year, str(exc))
-            failed_years.append(year)
+            print("PHASE 8 UNIFIED REQUEST ERROR:", year, str(exc))
+            return None, year, str(exc)
         except Exception as exc:
-            print("MULTI-TEMPORAL NDVI ERROR:", year, str(exc))
-            failed_years.append(year)
+            print("PHASE 8 UNIFIED ERROR:", year, str(exc))
+            return None, year, str(exc)
 
-    results.sort(key=lambda item: (item.get("analysis_year") is None, item.get("analysis_year") or 0))
+    results = []
+    failed_years = []
+    failed_details = []
 
+    with ThreadPoolExecutor(max_workers=min(3, len(ordered_scenes))) as executor:
+        futures = [executor.submit(process_scene, scene) for scene in ordered_scenes]
+        for future in as_completed(futures):
+            row, failed_year, detail = future.result()
+            if row is not None:
+                results.append(row)
+            if failed_year is not None and row is None:
+                failed_years.append(failed_year)
+                failed_details.append({"year": failed_year, "error": detail or "Unknown processing error."})
+
+    results.sort(key=lambda item: item["analysis_year"])
     return {
         "success": bool(results),
-        "module": "Multi-Temporal NDVI Analysis",
-        "phase": "8C",
+        "module": "Unified Multi-Temporal Spectral Analysis",
+        "phase": "8C-8D-8E",
         "product": "Sentinel-2 L2A",
-        "bands": ["B04", "B08"],
-        "formula": "(B08 - B04) / (B08 + B04)",
-        "vegetation_threshold": 0.20,
+        "selected_indices": selected,
         "same_aoi": True,
+        "aoi_validation": {
+            "same_aoi": True,
+            "valid_years": [item["year"] for item in validation if item["valid"]],
+            "invalid_years": [],
+            "results": validation,
+        },
         "requested_scene_count": len(scenes),
         "processed_scene_count": len(results),
-        "failed_years": failed_years,
+        "failed_years": sorted(failed_years),
+        "failed_details": failed_details,
         "results": results,
-        "note": "Year-wise NDVI is calculated using the same requested AOI and the selected Sentinel-2 acquisition date for each scene.",
+        "note": "Only user-selected indices were calculated. AOI coverage was validated automatically before processing.",
     }
+
+
+# ============================================================
+# PHASE 6D — DETERMINISTIC COMBINED LAND INTELLIGENCE
+# HF TOKEN NOT REQUIRED
+# ============================================================
+
+@app.post("/api/combined-land-ai-insight")
+async def combined_land_ai_insight(
+    mean_ndvi: float = Form(...),
+    vegetation_percentage: float = Form(...),
+    mean_ndwi: float = Form(...),
+    water_percentage: float = Form(...),
+    mean_ndbi: float = Form(...),
+    builtup_percentage: float = Form(...),
+    dominant_type: str = Form(...),
+    dominant_percentage: float = Form(...),
+    classification: str = Form(...),
+    classified_total_percentage: float = Form(...),
+    other_percentage: float = Form(...),
+    overlap_detected: bool = Form(...),
+):
+    """
+    Token-free Phase 6D satellite intelligence.
+
+    Uses the NDVI, NDWI and NDBI measurements already calculated
+    by SatQuery-AI. No Hugging Face request is made here.
+    """
+
+    # Keep the endpoint deterministic and evidence-based.
+    mean_ndvi = float(mean_ndvi)
+    vegetation_percentage = float(vegetation_percentage)
+    mean_ndwi = float(mean_ndwi)
+    water_percentage = float(water_percentage)
+    mean_ndbi = float(mean_ndbi)
+    builtup_percentage = float(builtup_percentage)
+    dominant_percentage = float(dominant_percentage)
+    classified_total_percentage = float(classified_total_percentage)
+    other_percentage = float(other_percentage)
+
+    # --------------------------------------------------------
+    # Indicator interpretation
+    # --------------------------------------------------------
+
+    if mean_ndvi >= 0.60:
+        vegetation_status = "High vegetation signal"
+    elif mean_ndvi >= 0.40:
+        vegetation_status = "Moderate vegetation signal"
+    elif mean_ndvi >= 0.20:
+        vegetation_status = "Low-to-moderate vegetation signal"
+    elif mean_ndvi >= 0.00:
+        vegetation_status = "Low vegetation signal"
+    else:
+        vegetation_status = "Very low vegetation signal"
+
+    if mean_ndwi >= 0.40:
+        water_status = "High water-related signal"
+    elif mean_ndwi >= 0.20:
+        water_status = "Moderate water-related signal"
+    elif mean_ndwi >= 0.00:
+        water_status = "Low-to-moderate water-related signal"
+    else:
+        water_status = "Low water-related signal"
+
+    if mean_ndbi >= 0.40:
+        builtup_status = "Very high built-up signal"
+    elif mean_ndbi >= 0.20:
+        builtup_status = "High built-up signal"
+    elif mean_ndbi >= 0.00:
+        builtup_status = "Moderate built-up signal"
+    else:
+        builtup_status = "Low built-up signal"
+
+    # --------------------------------------------------------
+    # Evidence-based text
+    # --------------------------------------------------------
+
+    overall_land_condition = (
+        f"{classification}. "
+        f"{dominant_type} is the dominant measured indicator "
+        f"at {dominant_percentage:.2f}%."
+    )
+
+    vegetation_insight = (
+        f"Mean NDVI is {mean_ndvi:.4f}, with a vegetation "
+        f"indicator of {vegetation_percentage:.2f}%. "
+        f"{vegetation_status}."
+    )
+
+    water_insight = (
+        f"Mean NDWI is {mean_ndwi:.4f}, with a water "
+        f"indicator of {water_percentage:.2f}%. "
+        f"{water_status}."
+    )
+
+    builtup_insight = (
+        f"Mean NDBI is {mean_ndbi:.4f}, with a built-up "
+        f"indicator of {builtup_percentage:.2f}%. "
+        f"{builtup_status}."
+    )
+
+    if overlap_detected:
+        composition_note = (
+            "The vegetation, water and built-up percentages are "
+            "independent threshold-based indicators and may overlap; "
+            "they are not mutually exclusive land-cover classes."
+        )
+    else:
+        composition_note = (
+            "The vegetation, water and built-up percentages are "
+            "independent threshold-based indicators."
+        )
+
+    short_conclusion = (
+        f"{classification}. The measured NDVI, NDWI and NDBI "
+        f"indicators should be interpreted together as evidence "
+        f"from the selected satellite scene."
+    )
+
+    insight = (
+        f"Overall Land Condition: {overall_land_condition}\n\n"
+        f"Vegetation: {vegetation_insight}\n\n"
+        f"Water: {water_insight}\n\n"
+        f"Built-up: {builtup_insight}\n\n"
+        f"Short Conclusion: {short_conclusion}\n\n"
+        f"Data Note: {composition_note}"
+    )
+
+    return {
+        "success": True,
+        "mode": "deterministic",
+        "provider": "local-evidence",
+        "module": "Combined Land AI Insight",
+        "phase": "6D",
+
+        # Main human-readable fields.
+        "overall_land_condition": overall_land_condition,
+        "vegetation": vegetation_insight,
+        "water": water_insight,
+        "built_up": builtup_insight,
+        "builtup": builtup_insight,
+        "short_conclusion": short_conclusion,
+        "insight": insight,
+
+        # Structured evidence.
+        "measurements": {
+            "mean_ndvi": round(mean_ndvi, 4),
+            "vegetation_percentage": round(vegetation_percentage, 2),
+            "mean_ndwi": round(mean_ndwi, 4),
+            "water_percentage": round(water_percentage, 2),
+            "mean_ndbi": round(mean_ndbi, 4),
+            "builtup_percentage": round(builtup_percentage, 2),
+        },
+
+        "classification": classification,
+        "dominant_type": dominant_type,
+        "dominant_percentage": round(dominant_percentage, 2),
+
+        "combined_statistics": {
+            "vegetation_percentage": round(
+                vegetation_percentage, 2
+            ),
+            "water_percentage": round(
+                water_percentage, 2
+            ),
+            "builtup_percentage": round(
+                builtup_percentage, 2
+            ),
+            "classified_total_percentage": round(
+                classified_total_percentage, 2
+            ),
+            "other_percentage": round(
+                other_percentage, 2
+            ),
+            "overlap_detected": overlap_detected,
+        },
+
+        "data_note": composition_note,
+    }
+
 
 # ============================================================
 # RUN SERVER
