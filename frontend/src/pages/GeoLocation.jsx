@@ -305,6 +305,10 @@ export default function GeoLocation() {
     setDateError,
   ] = useState("");
 
+  // Date inputs must never allow a future observation date.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
   /* =======================================================
      SATELLITE SEARCH
   ======================================================= */
@@ -346,6 +350,20 @@ export default function GeoLocation() {
   const [
     selectedScene,
     setSelectedScene,
+  ] = useState(null);
+
+  /* =======================================================
+     CHANGE DETECTION SELECTIONS
+  ======================================================= */
+
+  const [
+    changeBefore,
+    setChangeBefore,
+  ] = useState(null);
+
+  const [
+    changeAfter,
+    setChangeAfter,
   ] = useState(null);
 
   /* =======================================================
@@ -1267,6 +1285,15 @@ export default function GeoLocation() {
         null
       );
 
+      setChangeBefore(null);
+      setChangeAfter(null);
+      sessionStorage.removeItem(
+        "satquery_change_before"
+      );
+      sessionStorage.removeItem(
+        "satquery_change_after"
+      );
+
       setPreviewLoading(
         false
       );
@@ -1384,9 +1411,9 @@ export default function GeoLocation() {
 
         <div className="absolute left-[-100px] top-[-120px] h-[450px] w-[450px] rounded-full bg-blue-600/10 blur-[150px]" />
 
-        <div className="absolute right-[-120px] top-[30%] h-[450px] w-[450px] rounded-full bg-purple-600/10 blur-[160px]" />
+        <div className="absolute right-[-120px] top-[30%] h-[450px] w-[450px] rounded-full bg-blue-600/10 blur-[160px]" />
 
-        <div className="absolute bottom-[-150px] left-[35%] h-[400px] w-[400px] rounded-full bg-cyan-500/5 blur-[150px]" />
+        <div className="absolute bottom-[-150px] left-[35%] h-[400px] w-[400px] rounded-full bg-blue-500/5 blur-[150px]" />
 
       </div>
 
@@ -1711,7 +1738,7 @@ export default function GeoLocation() {
                   onClick={
                     startAreaSelection
                   }
-                  className="rounded-xl border border-cyan-400/20 bg-black/85 px-3 py-2 text-xs font-semibold text-cyan-300 shadow-2xl backdrop-blur-xl transition hover:bg-cyan-500/10 md:px-4"
+                  className="rounded-xl border border-blue-400/20 bg-black/85 px-3 py-2 text-xs font-semibold text-blue-300 shadow-2xl backdrop-blur-xl transition hover:bg-blue-500/10 md:px-4"
                 >
                   ⬜ Select Area
                 </button>
@@ -1741,7 +1768,7 @@ export default function GeoLocation() {
                     onClick={
                       focusArea
                     }
-                    className="rounded-xl border border-cyan-400/20 bg-black/85 px-3 py-2 text-xs font-semibold text-cyan-300 shadow-2xl backdrop-blur-xl transition hover:bg-cyan-500/10 md:px-4"
+                    className="rounded-xl border border-blue-400/20 bg-black/85 px-3 py-2 text-xs font-semibold text-blue-300 shadow-2xl backdrop-blur-xl transition hover:bg-blue-500/10 md:px-4"
                   >
                     ⛶ Focus AOI
                   </button>
@@ -1766,13 +1793,13 @@ export default function GeoLocation() {
 
             {selectingArea && (
 
-              <div className="absolute left-4 top-4 z-[1000] max-w-[280px] rounded-xl border border-cyan-400/20 bg-black/85 px-4 py-3 text-xs text-cyan-300 shadow-2xl backdrop-blur-xl md:max-w-sm">
+              <div className="absolute left-4 top-4 z-[1000] max-w-[280px] rounded-xl border border-blue-400/20 bg-black/85 px-4 py-3 text-xs text-blue-300 shadow-2xl backdrop-blur-xl md:max-w-sm">
 
                 <p className="font-semibold">
                   AOI Selection
                 </p>
 
-                <p className="mt-1 leading-5 text-cyan-200/70">
+                <p className="mt-1 leading-5 text-blue-200/70">
 
                   {areaStart
                     ? "Now click the opposite corner of your analysis area."
@@ -1789,9 +1816,9 @@ export default function GeoLocation() {
             {areaBounds &&
               !selectingArea && (
 
-              <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-cyan-400/20 bg-black/85 px-4 py-3 shadow-2xl backdrop-blur-xl">
+              <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-blue-400/20 bg-black/85 px-4 py-3 shadow-2xl backdrop-blur-xl">
 
-                <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-blue-300">
                   AOI Selected
                 </p>
 
@@ -1847,10 +1874,19 @@ export default function GeoLocation() {
               {mapType ===
               "satellite" ? (
 
-                <TileLayer
-                  attribution="Tiles &copy; Esri"
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                />
+                <>
+                  <TileLayer
+                    attribution="Tiles &copy; Esri"
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  />
+
+                  {/* Place names and geographic labels over satellite imagery */}
+                  <TileLayer
+                    attribution="&copy; Esri"
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+                    pane="overlayPane"
+                  />
+                </>
 
               ) : (
 
@@ -1946,10 +1982,10 @@ export default function GeoLocation() {
                   }
                   pathOptions={{
                     color:
-                      "#22d3ee",
+                      "#3b82f6",
                     weight: 2,
                     fillColor:
-                      "#22d3ee",
+                      "#3b82f6",
                     fillOpacity:
                       0.15,
                   }}
@@ -2043,7 +2079,7 @@ export default function GeoLocation() {
                   Longitude
                 </p>
 
-                <p className="mt-2 text-lg font-semibold text-purple-400">
+                <p className="mt-2 text-lg font-semibold text-blue-400">
                   {position[1].toFixed(
                     6
                   )}
@@ -2055,7 +2091,7 @@ export default function GeoLocation() {
 
             {/* AOI */}
 
-            <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4">
+            <div className="mt-4 rounded-2xl border border-blue-400/20 bg-blue-400/[0.04] p-4">
 
               <div className="flex items-center justify-between gap-2">
 
@@ -2065,7 +2101,7 @@ export default function GeoLocation() {
 
                 {areaBounds && (
 
-                  <span className="rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-300">
+                  <span className="rounded-full bg-blue-400/10 px-2 py-1 text-[10px] text-blue-300">
                     AOI SELECTED
                   </span>
 
@@ -2077,7 +2113,7 @@ export default function GeoLocation() {
 
                 <>
 
-                  <p className="mt-3 text-xl font-semibold text-cyan-300">
+                  <p className="mt-3 text-xl font-semibold text-blue-300">
 
                     {areaKm2 <
                       0.01
@@ -2177,8 +2213,9 @@ export default function GeoLocation() {
                       fromDate
                     }
                     max={
-                      toDate ||
-                      undefined
+                      toDate && toDate < today
+                        ? toDate
+                        : today
                     }
                     onChange={(
                       event
@@ -2186,6 +2223,13 @@ export default function GeoLocation() {
                       const value =
                         event.target
                           .value;
+
+                      if (value > today) {
+                        setDateError(
+                          "Please select a date up to today."
+                        );
+                        return;
+                      }
 
                       setFromDate(
                         value
@@ -2250,12 +2294,20 @@ export default function GeoLocation() {
                       fromDate ||
                       undefined
                     }
+                    max={today}
                     onChange={(
                       event
                     ) => {
                       const value =
                         event.target
                           .value;
+
+                      if (value > today) {
+                        setDateError(
+                          "Please select a date up to today."
+                        );
+                        return;
+                      }
 
                       setToDate(
                         value
@@ -2310,7 +2362,6 @@ export default function GeoLocation() {
               {dateError && (
 
                 <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/[0.05] px-4 py-3 text-xs leading-5 text-red-300">
-                  ⚠️{" "}
                   {dateError}
                 </div>
 
@@ -2347,7 +2398,7 @@ export default function GeoLocation() {
                   Cloud Cover
                 </p>
 
-                <span className="text-xs font-semibold text-cyan-300">
+                <span className="text-xs font-semibold text-blue-300">
                   ≤{" "}
                   {maxCloudCover}%
                 </span>
@@ -2395,7 +2446,7 @@ export default function GeoLocation() {
                     ""
                   );
                 }}
-                className="mt-3 w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/50"
+                className="mt-3 w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-blue-400/50"
               >
 
                 <option value="10">
@@ -2436,7 +2487,7 @@ export default function GeoLocation() {
             <div
               className={`mt-6 rounded-2xl border p-4 ${
                 isReadyForSatelliteData
-                  ? "border-green-400/20 bg-green-400/[0.05]"
+                  ? "border-blue-400/20 bg-blue-400/[0.05]"
                   : dateError
                   ? "border-red-400/20 bg-red-400/[0.05]"
                   : "border-blue-400/20 bg-blue-400/[0.05]"
@@ -2446,7 +2497,7 @@ export default function GeoLocation() {
               <p
                 className={`text-xs uppercase tracking-wider ${
                   isReadyForSatelliteData
-                    ? "text-green-400"
+                    ? "text-blue-400"
                     : dateError
                     ? "text-red-400"
                     : "text-blue-400"
@@ -2525,365 +2576,12 @@ export default function GeoLocation() {
         {satelliteMessage &&
           !satelliteError && (
 
-          <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] px-5 py-4 text-sm text-cyan-200">
+          <div className="mt-6 rounded-2xl border border-blue-400/20 bg-blue-400/[0.05] px-5 py-4 text-sm text-blue-200">
 
             🛰️{" "}
             {satelliteMessage}
 
           </div>
-
-        )}
-
-        {/* =================================================
-            SELECTED SCENE
-        ================================================== */}
-
-        {selectedScene && (
-
-          <section className="mt-8 overflow-hidden rounded-3xl border border-green-400/20 bg-green-400/[0.04]">
-
-            <div className="border-b border-white/10 px-5 py-5">
-
-              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-
-                <div>
-
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-green-400">
-                    Selected Sentinel-2 Scene
-                  </p>
-
-                  <h3 className="mt-2 break-words text-lg font-semibold text-white md:text-xl">
-                    {selectedScene.product_name ||
-                      selectedScene.id ||
-                      "Sentinel-2 Scene"}
-                  </h3>
-
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
-
-                    <span>
-                      📅{" "}
-                      {formatDate(
-                        selectedScene.acquisition_date
-                      )}
-                    </span>
-
-                    {formatTime(
-                      selectedScene.acquisition_date
-                    ) && (
-
-                      <span>
-                        🕐{" "}
-                        {formatTime(
-                          selectedScene.acquisition_date
-                        )}
-                      </span>
-
-                    )}
-
-                    <span>
-                      ☁️ Cloud{" "}
-                      {formatCloud(
-                        selectedScene.cloud_cover
-                      )}
-                    </span>
-
-                  </div>
-
-                </div>
-
-                <span className="w-fit rounded-full border border-green-400/20 bg-green-400/10 px-4 py-2 text-xs font-semibold text-green-300">
-                  ✓ SCENE SELECTED
-                </span>
-
-              </div>
-
-              {/* SCENE INFO */}
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-
-                <InfoItem
-                  label="Collection"
-                  value="Sentinel-2 L2A"
-                />
-
-                <InfoItem
-                  label="Platform"
-                  value={
-                    selectedScene.platform ||
-                    selectedScene.constellation ||
-                    "Sentinel-2"
-                  }
-                />
-
-                <InfoItem
-                  label="Tile"
-                  value={
-                    selectedScene.mgrs_tile ||
-                    "N/A"
-                  }
-                />
-
-                <InfoItem
-                  label="Orbit"
-                  value={
-                    selectedScene.orbit_state ||
-                    "N/A"
-                  }
-                />
-
-              </div>
-
-              {/* PREVIEW BUTTON */}
-
-              <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-
-                <button
-                  type="button"
-                  onClick={
-                    previewSelectedScene
-                  }
-                  disabled={
-                    previewLoading
-                  }
-                  className={`rounded-xl px-6 py-3 text-sm font-semibold transition ${
-                    previewLoading
-                      ? "cursor-not-allowed bg-gray-700 text-gray-500"
-                      : "bg-cyan-500 text-white hover:bg-cyan-400"
-                  }`}
-                >
-
-                  {previewLoading
-                    ? "🛰️ Loading Preview..."
-                    : "🖼️ Preview Scene"}
-
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedScene(
-                      null
-                    );
-
-                    setPreviewImage(
-                      ""
-                    );
-
-                    setPreviewError(
-                      ""
-                    );
-
-                    setSatelliteMessage(
-                      "Scene selection cleared."
-                    );
-                  }}
-                  className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/10 hover:text-white"
-                >
-                  Clear Selection
-                </button>
-
-              </div>
-
-            </div>
-
-            {/* PREVIEW ERROR */}
-
-            {previewError && (
-
-              <div className="border-b border-white/10 px-5 py-4">
-
-                <div className="rounded-xl border border-red-400/20 bg-red-500/[0.06] px-4 py-3 text-sm leading-6 text-red-300">
-                  ⚠️{" "}
-                  {previewError}
-                </div>
-
-              </div>
-
-            )}
-
-            {/* PREVIEW IMAGE */}
-
-            {previewImage && (
-
-              <div className="p-5">
-
-                <div className="overflow-hidden rounded-2xl border border-cyan-400/20 bg-black/40">
-
-                  <div className="border-b border-white/10 px-5 py-4">
-
-                    <div className="flex flex-col justify-between gap-2 md:flex-row md:items-center">
-
-                      <div>
-
-                        <p className="text-xs uppercase tracking-[0.2em] text-cyan-400">
-                          Sentinel-2 Preview
-                        </p>
-
-                        <p className="mt-1 text-sm text-gray-400">
-                          True-color RGB •{" "}
-                          {formatDate(
-                            selectedScene.acquisition_date
-                          )}
-                        </p>
-
-                      </div>
-
-                      <span className="rounded-full bg-cyan-400/10 px-3 py-1.5 text-[10px] font-semibold text-cyan-300">
-                        B04 • B03 • B02
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                  <div className="bg-black p-3 md:p-5">
-
-                    <img
-                      src={
-                        previewImage
-                      }
-                      alt="Sentinel-2 satellite preview"
-                      className="mx-auto h-auto max-h-[700px] w-full rounded-xl object-contain"
-                    />
-                    {/* USE THIS SCENE FOR IMAGE ANALYSIS */}
-<div className="mt-5 flex justify-center">
-  <button
-    type="button"
-    onClick={() => {
-      if (!selectedScene || !previewImage) {
-        setPreviewError(
-          "Please generate a satellite preview first."
-        );
-        return;
-      }
-
-      sessionStorage.setItem(
-        "satquery_selected_scene",
-        JSON.stringify({
-          scene: selectedScene,
-          previewImage,
-          areaBounds,
-        })
-      );
-
-      window.location.href = "/analysis/image";
-    }}
-    className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:from-cyan-400 hover:to-blue-400"
-  >
-    🔍 Use This Scene for Image Analysis
-  </button>
-</div>
-
-                  </div>
-                  
-
-                </div>
-                {/* =========================================================
-    CHANGE DETECTION SCENE SELECTION
-========================================================= */}
-
-<div className="mt-5 grid gap-3 md:grid-cols-2">
-
-  {/* BEFORE */}
-  <button
-    type="button"
-    onClick={() => {
-      if (!selectedScene || !previewImage) {
-        setPreviewError(
-          "Please generate a satellite preview first."
-        );
-        return;
-      }
-
-      sessionStorage.setItem(
-        "satquery_change_before",
-        JSON.stringify({
-          scene: selectedScene,
-          previewImage,
-          areaBounds,
-        })
-      );
-
-      setSatelliteMessage(
-        `✅ Before scene selected: ${formatDate(
-          selectedScene.acquisition_date
-        )}`
-      );
-    }}
-    className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-5 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20"
-  >
-    🕐 Use as Before
-  </button>
-
-  {/* AFTER */}
-  <button
-    type="button"
-    onClick={() => {
-      if (!selectedScene || !previewImage) {
-        setPreviewError(
-          "Please generate a satellite preview first."
-        );
-        return;
-      }
-
-      sessionStorage.setItem(
-        "satquery_change_after",
-        JSON.stringify({
-          scene: selectedScene,
-          previewImage,
-          areaBounds,
-        })
-      );
-
-      setSatelliteMessage(
-        `✅ After scene selected: ${formatDate(
-          selectedScene.acquisition_date
-        )}`
-      );
-    }}
-    className="rounded-xl border border-purple-400/20 bg-purple-500/10 px-5 py-3 text-sm font-semibold text-purple-300 transition hover:bg-purple-500/20"
-  >
-    ⚡ Use as After
-  </button>
-
-</div>
-
-{/* OPEN CHANGE DETECTION */}
-<div className="mt-4 flex justify-center">
-  <button
-    type="button"
-    onClick={() => {
-      const before =
-        sessionStorage.getItem(
-          "satquery_change_before"
-        );
-
-      const after =
-        sessionStorage.getItem(
-          "satquery_change_after"
-        );
-
-      if (!before || !after) {
-        setPreviewError(
-          "Please select both Before and After scenes first."
-        );
-        return;
-      }
-
-      window.location.href =
-        "/analysis/change-detection";
-    }}
-    className="w-full rounded-xl bg-gradient-to-r from-purple-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/20 transition hover:from-purple-400 hover:to-fuchsia-400"
-  >
-    🔍 Open Change Detection
-  </button>
-</div>
-
-              </div>
-
-            )}
-
-          </section>
 
         )}
 
@@ -2900,7 +2598,7 @@ export default function GeoLocation() {
 
               <div>
 
-                <p className="text-xs uppercase tracking-[0.25em] text-cyan-400">
+                <p className="text-xs uppercase tracking-[0.25em] text-blue-400">
                   Sentinel-2 Results
                 </p>
 
@@ -2955,8 +2653,8 @@ export default function GeoLocation() {
                       }
                       className={`group overflow-hidden rounded-2xl border p-5 transition ${
                         isSelected
-                          ? "border-green-400/40 bg-green-400/[0.06]"
-                          : "border-white/10 bg-white/[0.03] hover:border-cyan-400/20 hover:bg-cyan-400/[0.03]"
+                          ? "md:col-span-2 xl:col-span-3 border-blue-400/40 bg-blue-400/[0.06]"
+                          : "border-white/10 bg-white/[0.03] hover:border-blue-400/20 hover:bg-blue-400/[0.03]"
                       }`}
                     >
 
@@ -2964,7 +2662,7 @@ export default function GeoLocation() {
 
                       <div className="flex items-start justify-between gap-3">
 
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-400/10 text-xl">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-400/10 text-xl">
                           🛰️
                         </div>
 
@@ -2973,12 +2671,12 @@ export default function GeoLocation() {
                             Number(
                               scene.cloud_cover
                             ) <= 20
-                              ? "bg-green-400/10 text-green-300"
+                              ? "bg-blue-400/10 text-blue-300"
                               : Number(
                                   scene.cloud_cover
                                 ) <=
                                 40
-                              ? "bg-yellow-400/10 text-yellow-300"
+                              ? "bg-blue-400/10 text-blue-300"
                               : "bg-red-400/10 text-red-300"
                           }`}
                         >
@@ -3000,7 +2698,7 @@ export default function GeoLocation() {
                             "Sentinel-2 Scene"}
                         </p>
 
-                        <p className="mt-2 text-xs text-cyan-300">
+                        <p className="mt-2 text-xs text-blue-300">
                           {formatDate(
                             scene.acquisition_date
                           )}
@@ -3097,8 +2795,8 @@ export default function GeoLocation() {
                         }
                         className={`mt-4 w-full rounded-xl py-3 text-xs font-semibold transition ${
                           isSelected
-                            ? "bg-green-500 text-white"
-                            : "border border-cyan-400/20 bg-cyan-400/5 text-cyan-300 hover:bg-cyan-400/10"
+                            ? "bg-blue-500 text-white"
+                            : "border border-blue-400/20 bg-blue-400/5 text-blue-300 hover:bg-blue-400/10"
                         }`}
                       >
 
@@ -3107,6 +2805,426 @@ export default function GeoLocation() {
                           : "Select Scene"}
 
                       </button>
+
+                      {isSelected && (
+
+
+                        <div className="mt-5 border-t border-blue-400/20 pt-5">
+
+                          <div className="px-0 py-0">
+
+                            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+
+                              <div>
+
+                                <p className="text-[10px] uppercase tracking-[0.2em] text-blue-400">
+                                  Selected Sentinel-2 Scene
+                                </p>
+
+                                <h3 className="mt-2 break-words text-lg font-semibold text-white md:text-xl">
+                                  {selectedScene.product_name ||
+                                    selectedScene.id ||
+                                    "Sentinel-2 Scene"}
+                                </h3>
+
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+
+                                  <span>
+                                    📅{" "}
+                                    {formatDate(
+                                      selectedScene.acquisition_date
+                                    )}
+                                  </span>
+
+                                  {formatTime(
+                                    selectedScene.acquisition_date
+                                  ) && (
+
+                                    <span>
+                                      🕐{" "}
+                                      {formatTime(
+                                        selectedScene.acquisition_date
+                                      )}
+                                    </span>
+
+                                  )}
+
+                                  <span>
+                                    ☁️ Cloud{" "}
+                                    {formatCloud(
+                                      selectedScene.cloud_cover
+                                    )}
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                              <span className="w-fit rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-xs font-semibold text-blue-300">
+                                ✓ SCENE SELECTED
+                              </span>
+
+                            </div>
+
+                            {/* SCENE INFO */}
+
+                            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+
+                              <InfoItem
+                                label="Collection"
+                                value="Sentinel-2 L2A"
+                              />
+
+                              <InfoItem
+                                label="Platform"
+                                value={
+                                  selectedScene.platform ||
+                                  selectedScene.constellation ||
+                                  "Sentinel-2"
+                                }
+                              />
+
+                              <InfoItem
+                                label="Tile"
+                                value={
+                                  selectedScene.mgrs_tile ||
+                                  "N/A"
+                                }
+                              />
+
+                              <InfoItem
+                                label="Orbit"
+                                value={
+                                  selectedScene.orbit_state ||
+                                  "N/A"
+                                }
+                              />
+
+                            </div>
+
+                            {/* PREVIEW BUTTON */}
+
+                            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+
+                              <button
+                                type="button"
+                                onClick={
+                                  previewSelectedScene
+                                }
+                                disabled={
+                                  previewLoading
+                                }
+                                className={`rounded-xl px-6 py-3 text-sm font-semibold transition ${
+                                  previewLoading
+                                    ? "cursor-not-allowed bg-gray-700 text-gray-500"
+                                    : "bg-blue-500 text-white hover:bg-blue-400"
+                                }`}
+                              >
+
+                                {previewLoading
+                                  ? "🛰️ Loading Preview..."
+                                  : "🖼️ Preview Scene"}
+
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedScene(
+                                    null
+                                  );
+
+                                  setPreviewImage(
+                                    ""
+                                  );
+
+                                  setPreviewError(
+                                    ""
+                                  );
+
+                                  setSatelliteMessage(
+                                    "Scene selection cleared."
+                                  );
+                                }}
+                                className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/10 hover:text-white"
+                              >
+                                Clear Selection
+                              </button>
+
+                            </div>
+
+                          </div>
+
+                          {/* PREVIEW ERROR */}
+
+                          {previewError && (
+
+                            <div className="border-b border-white/10 px-5 py-4">
+
+                              <div className="rounded-xl border border-red-400/20 bg-red-500/[0.06] px-4 py-3 text-sm leading-6 text-red-300">
+                                ⚠️{" "}
+                                {previewError}
+                              </div>
+
+                            </div>
+
+                          )}
+
+                          {/* PREVIEW IMAGE */}
+
+                          {previewImage && (
+
+                            <div className="p-5">
+
+                              <div className="overflow-hidden rounded-2xl border border-blue-400/20 bg-black/40">
+
+                                <div className="border-b border-white/10 px-5 py-4">
+
+                                  <div className="flex flex-col justify-between gap-2 md:flex-row md:items-center">
+
+                                    <div>
+
+                                      <p className="text-xs uppercase tracking-[0.2em] text-blue-400">
+                                        Sentinel-2 Preview
+                                      </p>
+
+                                      <p className="mt-1 text-sm text-gray-400">
+                                        True-color RGB •{" "}
+                                        {formatDate(
+                                          selectedScene.acquisition_date
+                                        )}
+                                      </p>
+
+                                    </div>
+
+                                    <span className="rounded-full bg-blue-400/10 px-3 py-1.5 text-[10px] font-semibold text-blue-300">
+                                      B04 • B03 • B02
+                                    </span>
+
+                                  </div>
+
+                                </div>
+
+                                <div className="bg-black p-3 md:p-5">
+
+                                  <img
+                                    src={
+                                      previewImage
+                                    }
+                                    alt="Sentinel-2 satellite preview"
+                                    className="mx-auto h-auto max-h-[700px] w-full rounded-xl object-contain"
+                                  />
+                                  {/* USE THIS SCENE FOR IMAGE ANALYSIS */}
+<div className="mt-5 flex justify-center">
+  <button
+    type="button"
+    onClick={() => {
+      if (!selectedScene || !previewImage) {
+                      setPreviewError(
+                        "Please generate a satellite preview first."
+                      );
+                      return;
+      }
+
+      sessionStorage.setItem(
+                      "satquery_selected_scene",
+                      JSON.stringify({
+                        scene: selectedScene,
+                        previewImage,
+                        areaBounds,
+                      })
+      );
+
+      window.location.href = "/analysis/image";
+    }}
+    className="w-full rounded-xl bg-gradient-to-r from-blue-500 to-blue-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-400 hover:to-blue-400"
+  >
+    🔍 Use This Scene for Image Analysis
+  </button>
+</div>
+
+                                </div>
+                                
+
+                              </div>
+                              {/* =========================================================
+    CHANGE DETECTION SCENE SELECTION
+========================================================= */}
+
+<div className="mt-5">
+
+  {/* VISUAL BEFORE / AFTER STATUS */}
+  <div className="mb-4 grid gap-3 md:grid-cols-2">
+
+    <div className={`rounded-xl border px-4 py-3 ${
+      changeBefore
+        ? "border-blue-400/30 bg-blue-500/10"
+        : "border-white/10 bg-black/20"
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+          Before Scene
+        </span>
+        <span className={`text-xs font-semibold ${
+          changeBefore ? "text-blue-300" : "text-gray-600"
+        }`}>
+          {changeBefore ? "✓ Selected" : "Not Selected"}
+        </span>
+      </div>
+      {changeBefore && (
+        <p className="mt-2 truncate text-xs text-gray-300">
+          {formatDate(changeBefore.scene?.acquisition_date)}
+        </p>
+      )}
+    </div>
+
+    <div className={`rounded-xl border px-4 py-3 ${
+      changeAfter
+        ? "border-blue-400/30 bg-blue-500/10"
+        : "border-white/10 bg-black/20"
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+          After Scene
+        </span>
+        <span className={`text-xs font-semibold ${
+          changeAfter ? "text-blue-300" : "text-gray-600"
+        }`}>
+          {changeAfter ? "✓ Selected" : "Not Selected"}
+        </span>
+      </div>
+      {changeAfter && (
+        <p className="mt-2 truncate text-xs text-gray-300">
+          {formatDate(changeAfter.scene?.acquisition_date)}
+        </p>
+      )}
+    </div>
+
+  </div>
+
+  <div className="grid gap-3 md:grid-cols-2">
+
+    {/* BEFORE */}
+    <button
+      type="button"
+      onClick={() => {
+        if (!selectedScene || !previewImage) {
+          setPreviewError(
+            "Please generate a satellite preview first."
+          );
+          return;
+        }
+
+        const beforeData = {
+          scene: selectedScene,
+          previewImage,
+          areaBounds,
+        };
+
+        sessionStorage.setItem(
+          "satquery_change_before",
+          JSON.stringify(beforeData)
+        );
+
+        setChangeBefore(beforeData);
+        setSatelliteMessage(
+          `✓ Before scene selected: ${formatDate(
+            selectedScene.acquisition_date
+          )}`
+        );
+
+        setSelectedScene(null);
+        setPreviewImage("");
+        setPreviewError("");
+      }}
+      className={`rounded-xl border px-5 py-3 text-sm font-semibold transition ${
+        changeBefore
+          ? "border-blue-400/30 bg-blue-500/15 text-blue-300 hover:bg-blue-500/20"
+          : "border-blue-400/20 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20"
+      }`}
+    >
+      {changeBefore ? "✓ Before Selected — Select Another Scene" : "🕐 Use as Before"}
+    </button>
+
+    {/* AFTER */}
+    <button
+      type="button"
+      onClick={() => {
+        if (!selectedScene || !previewImage) {
+          setPreviewError(
+            "Please generate a satellite preview first."
+          );
+          return;
+        }
+
+        const afterData = {
+          scene: selectedScene,
+          previewImage,
+          areaBounds,
+        };
+
+        sessionStorage.setItem(
+          "satquery_change_after",
+          JSON.stringify(afterData)
+        );
+
+        setChangeAfter(afterData);
+        setSatelliteMessage(
+          `✓ After scene selected: ${formatDate(
+            selectedScene.acquisition_date
+          )}`
+        );
+      }}
+      className={`rounded-xl border px-5 py-3 text-sm font-semibold transition ${
+        changeAfter
+          ? "border-blue-400/30 bg-blue-500/15 text-blue-300 hover:bg-blue-500/20"
+          : "border-blue-400/20 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20"
+      }`}
+    >
+      {changeAfter ? "✓ After Selected" : "⚡ Use as After"}
+    </button>
+
+  </div>
+
+</div>
+
+{/* OPEN CHANGE DETECTION */}
+<div className="mt-4 flex justify-center">
+  <button
+    type="button"
+    onClick={() => {
+      const before =
+                      sessionStorage.getItem(
+                        "satquery_change_before"
+                      );
+
+      const after =
+                      sessionStorage.getItem(
+                        "satquery_change_after"
+                      );
+
+      if (!before || !after) {
+                      setPreviewError(
+                        "Please select both Before and After scenes first."
+                      );
+                      return;
+      }
+
+      window.location.href =
+                      "/analysis/change-detection";
+    }}
+    className="w-full rounded-xl bg-blue-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400"
+  >
+    🔍 Open Change Detection
+  </button>
+</div>
+
+                            </div>
+
+                          )}
+
+                        </div>
+                      )}
 
                     </div>
 
@@ -3151,52 +3269,6 @@ export default function GeoLocation() {
 
         )}
 
-        {/* =================================================
-            WORKFLOW
-        ================================================== */}
-
-        <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-
-          <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
-            Workflow
-          </p>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-5">
-
-            <Step
-              number="01"
-              title="Search"
-              text="Search for a city, state, country or place."
-            />
-
-            <Step
-              number="02"
-              title="Select Point"
-              text="Choose the correct location or click the map."
-            />
-
-            <Step
-              number="03"
-              title="Draw AOI"
-              text="Select two opposite corners of the analysis area."
-            />
-
-            <Step
-              number="04"
-              title="Set Filters"
-              text="Choose dates and maximum cloud cover."
-            />
-
-            <Step
-              number="05"
-              title="Select Scene"
-              text="Find a Sentinel-2 scene and preview it."
-            />
-
-          </div>
-
-        </div>
-
       </main>
 
     </div>
@@ -3220,34 +3292,6 @@ function InfoItem({
 
       <p className="mt-1 truncate text-xs font-medium text-gray-300">
         {value}
-      </p>
-
-    </div>
-  );
-}
-
-/* =========================================================
-   STEP CARD
-========================================================= */
-
-function Step({
-  number,
-  title,
-  text,
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-
-      <p className="text-xs font-semibold text-blue-400">
-        {number}
-      </p>
-
-      <h4 className="mt-2 font-medium">
-        {title}
-      </h4>
-
-      <p className="mt-1 text-xs leading-5 text-gray-500">
-        {text}
       </p>
 
     </div>

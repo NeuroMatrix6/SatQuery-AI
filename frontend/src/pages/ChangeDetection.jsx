@@ -716,9 +716,9 @@ useEffect(() => {
     <div className="min-h-screen bg-[#030712] text-white">
       {/* BACKGROUND */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-[5%] top-[-150px] h-[500px] w-[500px] rounded-full bg-purple-600/10 blur-[160px]" />
+        <div className="absolute left-[5%] top-[-150px] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[160px]" />
         <div className="absolute right-[-100px] top-[30%] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[170px]" />
-        <div className="absolute bottom-[-150px] left-[35%] h-[400px] w-[400px] rounded-full bg-cyan-500/5 blur-[150px]" />
+        <div className="absolute bottom-[-150px] left-[35%] h-[400px] w-[400px] rounded-full bg-blue-500/5 blur-[150px]" />
       </div>
 
       {/* NAVBAR */}
@@ -755,7 +755,7 @@ useEffect(() => {
             Analysis
           </button>
 
-          <button className="text-purple-400">
+          <button className="text-blue-400">
             Change Detection
           </button>
         </div>
@@ -768,7 +768,7 @@ useEffect(() => {
           <div className="mb-4 flex items-center gap-2">
             <span className="h-2 w-2 animate-pulse rounded-full bg-purple-400" />
 
-            <p className="text-xs uppercase tracking-[0.3em] text-purple-400">
+            <p className="text-xs uppercase tracking-[0.3em] text-blue-400">
               Temporal Change Intelligence
             </p>
           </div>
@@ -777,7 +777,7 @@ useEffect(() => {
             <div>
               <h2 className="text-4xl font-bold tracking-tight md:text-6xl">
                 Detect What
-                <span className="block text-purple-400">
+                <span className="block text-blue-400">
                   Changed on Earth
                 </span>
               </h2>
@@ -789,12 +789,21 @@ useEffect(() => {
               </p>
             </div>
 
-            <button
-              onClick={() => navigate("/analysis")}
-              className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-gray-300 transition hover:bg-white/10 hover:text-white"
-            >
-              ← All Analysis
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => navigate("/analysis/geo")}
+                className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-5 py-3 text-sm font-medium text-blue-300 transition hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-white"
+              >
+                📍 Geo Location
+              </button>
+
+              <button
+                onClick={() => navigate("/analysis")}
+                className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-gray-300 transition hover:bg-white/10 hover:text-white"
+              >
+                ← All Analysis
+              </button>
+            </div>
           </div>
         </div>
 
@@ -823,7 +832,7 @@ useEffect(() => {
             type="after"
             onUpload={handleUpload}
             onRemove={removeImage}
-            accent="purple"
+            accent="blue"
           />
         </div>
 
@@ -832,7 +841,7 @@ useEffect(() => {
           <button
             type="button"
             onClick={loadDemoPair}
-            className="rounded-xl border border-purple-400/20 bg-purple-500/10 px-6 py-3 text-sm font-semibold text-purple-300 transition hover:bg-purple-500/20"
+            className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-6 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20"
           >
             ✦ Use Demo Pair — 2025 → 2026
           </button>
@@ -849,7 +858,7 @@ useEffect(() => {
             }
             className={`group rounded-2xl px-10 py-4 text-base font-semibold shadow-2xl transition-all duration-300 ${
               beforeImage && afterImage
-                ? "bg-purple-500 shadow-purple-500/30 hover:scale-105 hover:bg-purple-400"
+                ? "bg-blue-500 shadow-purple-500/30 hover:scale-105 hover:bg-purple-400"
                 : "cursor-not-allowed bg-gray-700 text-gray-500"
             }`}
           >
@@ -879,11 +888,11 @@ useEffect(() => {
 
         {/* RESULT */}
         {result && (
-          <section className="mt-12 overflow-hidden rounded-3xl border border-purple-500/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
+          <section className="mt-12 overflow-hidden rounded-3xl border border-blue-500/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
             {/* RESULT HEADER */}
             <div className="flex flex-col justify-between gap-4 border-b border-white/10 px-6 py-6 md:flex-row md:items-center">
               <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-purple-400">
+                <p className="text-xs uppercase tracking-[0.3em] text-blue-400">
                   Comparison Workspace
                 </p>
 
@@ -927,7 +936,7 @@ useEffect(() => {
                     After
                   </p>
 
-                  <span className="text-xs text-purple-400">
+                  <span className="text-xs text-blue-400">
                     RECENT
                   </span>
                 </div>
@@ -946,7 +955,7 @@ useEffect(() => {
             <div className="border-t border-white/10 p-6">
               <div className="mb-5 flex flex-col justify-between gap-4 md:flex-row md:items-center">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-purple-400">
+                  <p className="text-xs uppercase tracking-[0.25em] text-blue-400">
                     Change Map
                   </p>
 
@@ -955,18 +964,18 @@ useEffect(() => {
                   </h3>
                 </div>
 
-                <div className="rounded-xl border border-purple-400/20 bg-purple-500/10 px-5 py-3">
+                <div className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-5 py-3">
                   <p className="text-xs text-gray-500">
                     OVERALL CHANGE
                   </p>
 
-                  <p className="mt-1 text-xl font-bold text-purple-400">
+                  <p className="mt-1 text-xl font-bold text-blue-400">
                     {result.percentage}%
                   </p>
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-2xl border border-purple-400/20 bg-black">
+              <div className="overflow-hidden rounded-2xl border border-blue-400/20 bg-black">
                 <img
                   src={result.image}
                   alt="Multi-category satellite change map"
@@ -1057,7 +1066,7 @@ useEffect(() => {
                 />
 
                 <LegendItem
-                  color="bg-purple-500"
+                  color="bg-blue-500"
                   label="Other"
                 />
 
@@ -1069,9 +1078,9 @@ useEffect(() => {
             </div>
 
             {/* AI INTERPRETATION */}
-            <div className="border-t border-white/10 bg-purple-500/[0.04] p-6">
+            <div className="border-t border-white/10 bg-blue-500/[0.04] p-6">
               <div className="flex items-start gap-4">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-purple-400/20 bg-purple-500/10 text-xl">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10 text-xl">
                   ✦
                 </div>
 
@@ -1139,12 +1148,12 @@ useEffect(() => {
             PHASE 7 — MULTISPECTRAL CHANGE INTELLIGENCE
         ====================================================== */}
         {(multispectralChangeResult || isMultispectralChangeAnalyzing || multispectralChangeError) && (
-          <section className="mt-8 overflow-hidden rounded-3xl border border-cyan-400/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
+          <section className="mt-8 overflow-hidden rounded-3xl border border-blue-400/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
             <div className="border-b border-white/10 bg-cyan-500/[0.04] px-6 py-6">
               <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">
-                    Phase 7 · Multispectral Intelligence
+                  <p className="text-xs uppercase tracking-[0.3em] text-blue-400">
+                    Multispectral Intelligence
                   </p>
                   <h3 className="mt-2 text-2xl font-semibold">
                     NDVI + NDWI + NDBI Change
@@ -1188,7 +1197,7 @@ useEffect(() => {
                   <p className="text-sm text-red-300">{multispectralChangeError}</p>
                   {!beforeScene || !afterScene ? (
                     <p className="mt-2 text-xs text-gray-500">
-                      Phase 7 requires Sentinel-2 scenes selected with an AOI. Manual image uploads continue to use the existing visual change detection.
+                      Sentinel-2 scenes with a shared AOI are required for multispectral comparison. Manual image uploads continue to use visual change detection.
                     </p>
                   ) : null}
                 </div>
@@ -1218,12 +1227,12 @@ useEffect(() => {
                     after={multispectralChangeResult.comparison?.ndbi?.after}
                     change={multispectralChangeResult.comparison?.ndbi?.change}
                     direction={multispectralChangeResult.comparison?.ndbi?.direction}
-                    accent="purple"
+                    accent="brown"
                   />
                 </div>
 
                 <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <p className="text-xs uppercase tracking-[0.25em] text-cyan-400">
+                  <p className="text-xs uppercase tracking-[0.25em] text-blue-400">
                     Detected Multispectral Changes
                   </p>
                   <p className="mt-3 text-sm leading-7 text-gray-300">
@@ -1232,13 +1241,13 @@ useEffect(() => {
                 </div>
 
                 {multispectralAiInsight?.insight && (
-                  <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.04] p-5">
+                  <div className="mt-5 rounded-2xl border border-blue-400/20 bg-cyan-500/[0.04] p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-cyan-300">
+                      <p className="text-sm font-semibold text-blue-300">
                         ✦ AI Multispectral Insight
                       </p>
                       <span className="rounded-full border border-green-400/20 bg-green-400/10 px-3 py-1 text-[10px] uppercase tracking-wider text-green-400">
-                        {multispectralAiInsight.mode === "demo" ? "DEMO FALLBACK" : "LIVE MODEL"}
+                        {multispectralAiInsight.mode === "demo" ? "AVAILABLE" : "LIVE MODEL"}
                       </span>
                     </div>
                     <p className="mt-4 whitespace-pre-line text-sm leading-7 text-gray-200">
@@ -1285,7 +1294,7 @@ function MultispectralMetricCard({ title, before, after, change, direction, acce
   const accents = {
     green: "border-green-400/20 bg-green-500/[0.04] text-green-400",
     blue: "border-blue-400/20 bg-blue-500/[0.04] text-blue-400",
-    purple: "border-purple-400/20 bg-purple-500/[0.04] text-purple-400",
+    purple: "border-blue-400/20 bg-blue-500/[0.04] text-blue-400",
   };
 
   const cls = accents[accent] || accents.purple;
@@ -1359,10 +1368,10 @@ function CategoryStat({
     },
 
     cyan: {
-      border: "border-cyan-400/20",
-      bg: "bg-cyan-500/5",
+      border: "border-blue-400/20",
+      bg: "bg-blue-500/5",
       dot: "bg-cyan-400",
-      text: "text-cyan-400",
+      text: "text-blue-400",
     },
 
     purple: {
@@ -1441,11 +1450,11 @@ function ImageUploadCard({
     },
 
     purple: {
-      border: "border-purple-400/20",
+      border: "border-blue-400/20",
       hover: "hover:border-purple-400/50",
-      bg: "bg-purple-500/[0.04]",
-      text: "text-purple-400",
-      glow: "bg-purple-500/10",
+      bg: "bg-blue-500/[0.04]",
+      text: "text-blue-400",
+      glow: "bg-blue-500/10",
     },
   };
 

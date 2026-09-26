@@ -8,9 +8,8 @@ export default function Analysis() {
       icon: "🖼️",
       title: "Image Analysis",
       description:
-        "Upload satellite imagery and ask AI questions about what is visible in the scene.",
+        "Upload satellite imagery and analyze what is visible in the scene.",
       tag: "1 IMAGE",
-      color: "blue",
       path: "/analysis/image",
     },
 
@@ -18,9 +17,8 @@ export default function Analysis() {
       icon: "🔄",
       title: "Change Detection",
       description:
-        "Compare satellite images from different dates and identify meaningful changes.",
+        "Compare satellite images from different dates and identify changes.",
       tag: "2 IMAGES",
-      color: "purple",
       path: "/analysis/change",
     },
 
@@ -28,9 +26,8 @@ export default function Analysis() {
       icon: "📍",
       title: "Geo Location",
       description:
-        "Select a location on an interactive map and prepare coordinates for satellite-data analysis.",
+        "Select a geographic location and prepare it for satellite analysis.",
       tag: "MAP",
-      color: "cyan",
       path: "/analysis/geo",
     },
   ];
@@ -44,11 +41,32 @@ export default function Analysis() {
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
 
-        <div className="absolute left-[5%] top-[-150px] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[160px]" />
+        {/* Single Blue Glow */}
+        <div
+          className="
+            absolute
+            left-[15%]
+            top-[-180px]
+            h-[500px]
+            w-[500px]
+            rounded-full
+            bg-blue-600/10
+            blur-[170px]
+          "
+        />
 
-        <div className="absolute right-[-100px] top-[35%] h-[500px] w-[500px] rounded-full bg-purple-600/10 blur-[170px]" />
-
-        <div className="absolute bottom-[-200px] left-[35%] h-[400px] w-[400px] rounded-full bg-cyan-500/5 blur-[150px]" />
+        <div
+          className="
+            absolute
+            right-[-150px]
+            bottom-[-180px]
+            h-[450px]
+            w-[450px]
+            rounded-full
+            bg-blue-500/5
+            blur-[160px]
+          "
+        />
 
       </div>
 
@@ -57,7 +75,16 @@ export default function Analysis() {
           NAVBAR
       ====================================================== */}
 
-      <nav className="relative z-20 flex items-center justify-between border-b border-white/10 bg-black/30 px-8 py-5 backdrop-blur-xl">
+      <nav
+        className="
+          relative z-20
+          flex items-center justify-between
+          border-b border-white/10
+          bg-black/30
+          px-8 py-5
+          backdrop-blur-xl
+        "
+      >
 
         {/* LOGO */}
 
@@ -76,7 +103,14 @@ export default function Analysis() {
               SatQuery AI
             </h1>
 
-            <p className="text-[10px] uppercase tracking-[0.25em] text-blue-400">
+            <p
+              className="
+                text-[10px]
+                uppercase
+                tracking-[0.25em]
+                text-blue-400
+              "
+            >
               Satellite Intelligence
             </p>
 
@@ -87,7 +121,16 @@ export default function Analysis() {
 
         {/* NAVIGATION */}
 
-        <div className="hidden items-center gap-8 text-sm text-gray-400 md:flex">
+        <div
+          className="
+            hidden
+            items-center
+            gap-8
+            text-sm
+            text-gray-400
+            md:flex
+          "
+        >
 
           <button
             onClick={() => navigate("/")}
@@ -112,7 +155,15 @@ export default function Analysis() {
           MAIN
       ====================================================== */}
 
-      <main className="relative z-10 mx-auto max-w-6xl px-6 py-16">
+      <main
+        className="
+          relative z-10
+          mx-auto
+          max-w-6xl
+          px-6
+          py-16
+        "
+      >
 
         {/* ===================================================
             HEADER
@@ -120,32 +171,66 @@ export default function Analysis() {
 
         <div className="mx-auto max-w-3xl text-center">
 
+          {/* Small Label */}
+
           <div className="mb-5 flex items-center justify-center gap-2">
 
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+            <span
+              className="
+                h-2
+                w-2
+                rounded-full
+                bg-blue-400
+              "
+            />
 
-            <p className="text-xs uppercase tracking-[0.35em] text-blue-400">
-              AI Analysis Workspace
+            <p
+              className="
+                text-xs
+                uppercase
+                tracking-[0.35em]
+                text-blue-400
+              "
+            >
+              Satellite Analysis Workspace
             </p>
 
           </div>
 
 
-          <h2 className="text-4xl font-bold tracking-tight md:text-6xl">
+          {/* Main Heading */}
 
-            What do you want to
+          <h2
+            className="
+              text-4xl
+              font-bold
+              tracking-tight
+              md:text-6xl
+            "
+          >
+            Choose Your
 
             <span className="block text-blue-400">
-              analyze?
+              Analysis
             </span>
 
           </h2>
 
 
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-gray-400 md:text-lg">
-            Choose an analysis tool to explore satellite imagery,
-            understand what is visible, detect changes, and
-            select geographic locations for satellite analysis.
+          {/* Description */}
+
+          <p
+            className="
+              mx-auto
+              mt-6
+              max-w-2xl
+              text-base
+              leading-7
+              text-gray-400
+              md:text-lg
+            "
+          >
+            Select a satellite analysis workflow to begin.
           </p>
 
         </div>
@@ -155,7 +240,17 @@ export default function Analysis() {
             FEATURE GRID
         ==================================================== */}
 
-        <div className="mx-auto mt-14 grid max-w-6xl gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div
+          className="
+            mx-auto
+            mt-14
+            grid
+            max-w-6xl
+            gap-5
+            md:grid-cols-2
+            lg:grid-cols-3
+          "
+        >
 
           {features.map((feature) => (
             <FeatureCard
@@ -183,70 +278,51 @@ function FeatureCard({
   onClick,
 }) {
 
-  const colorClasses = {
-
-    blue: {
-      icon: "bg-blue-500/10 border-blue-400/20",
-      glow: "bg-blue-500/10",
-      text: "text-blue-400",
-      border: "hover:border-blue-400/40",
-    },
-
-    purple: {
-      icon: "bg-purple-500/10 border-purple-400/20",
-      glow: "bg-purple-500/10",
-      text: "text-purple-400",
-      border: "hover:border-purple-400/40",
-    },
-
-    cyan: {
-      icon: "bg-cyan-500/10 border-cyan-400/20",
-      glow: "bg-cyan-500/10",
-      text: "text-cyan-400",
-      border: "hover:border-cyan-400/40",
-    },
-
-  };
-
-
-  const colors =
-    colorClasses[feature.color] ||
-    colorClasses.blue;
-
-
   return (
     <button
       onClick={onClick}
-      className={`
-        group relative overflow-hidden
+      className="
+        group
+        relative
         w-full
-        rounded-3xl border border-white/10
+        overflow-hidden
+        rounded-3xl
+        border
+        border-white/10
         bg-white/[0.03]
         p-7
         text-left
         backdrop-blur-xl
-        transition-all duration-300
+        transition-all
+        duration-300
+
         hover:-translate-y-1
-        hover:bg-white/[0.06]
-        ${colors.border}
-      `}
+        hover:border-blue-400/40
+        hover:bg-white/[0.05]
+        hover:shadow-[0_15px_45px_rgba(37,99,235,0.10)]
+      "
     >
 
       {/* =================================================
-          GLOW
+          BLUE HOVER GLOW
       ================================================== */}
 
       <div
-        className={`
-          pointer-events-none absolute
-          -right-20 -top-20
-          h-48 w-48
-          rounded-full blur-3xl
+        className="
+          pointer-events-none
+          absolute
+          -right-20
+          -top-20
+          h-48
+          w-48
+          rounded-full
+          bg-blue-500/10
+          blur-3xl
           opacity-0
-          transition duration-500
+          transition
+          duration-500
           group-hover:opacity-100
-          ${colors.glow}
-        `}
+        "
       />
 
 
@@ -254,27 +330,45 @@ function FeatureCard({
           TOP ROW
       ================================================== */}
 
-      <div className="relative flex items-start justify-between">
+      <div
+        className="
+          relative
+          flex
+          items-start
+          justify-between
+        "
+      >
+
+        {/* ICON */}
 
         <div
-          className={`
-            flex h-14 w-14
-            items-center justify-center
-            rounded-2xl border
+          className="
+            flex
+            h-14
+            w-14
+            items-center
+            justify-center
+            rounded-2xl
+            border
+            border-blue-400/20
+            bg-blue-500/10
             text-2xl
-            ${colors.icon}
-          `}
+          "
         >
           {feature.icon}
         </div>
 
 
+        {/* TAG */}
+
         <span
           className="
-            rounded-full border
+            rounded-full
+            border
             border-white/10
             bg-black/30
-            px-3 py-1.5
+            px-3
+            py-1.5
             text-[10px]
             font-medium
             tracking-wider
@@ -297,7 +391,16 @@ function FeatureCard({
           {feature.title}
         </h3>
 
-        <p className="mt-3 min-h-[72px] max-w-md text-sm leading-6 text-gray-500">
+        <p
+          className="
+            mt-3
+            min-h-[72px]
+            max-w-md
+            text-sm
+            leading-6
+            text-gray-500
+          "
+        >
           {feature.description}
         </p>
 
@@ -305,20 +408,25 @@ function FeatureCard({
 
 
       {/* =================================================
-          BOTTOM
+          ACTION
       ================================================== */}
 
       <div
-        className={`
-          relative mt-7 flex items-center
-          gap-2 text-sm font-medium
-          ${colors.text}
-        `}
+        className="
+          relative
+          mt-7
+          flex
+          items-center
+          gap-2
+          text-sm
+          font-medium
+          text-blue-400
+        "
       >
 
         {feature.title === "Geo Location"
-          ? "Open Geo Location"
-          : "Open Analysis"}
+          ? "Select Location"
+          : "Start Analysis"}
 
         <span
           className="
