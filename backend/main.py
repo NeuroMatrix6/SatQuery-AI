@@ -4634,340 +4634,88 @@ async def multi_temporal_scenes(
 # VQA
 # ============================================================
 
+def local_vqa_fallback(image_bytes: bytes, question: str):
+    """Zero-cost deterministic fallback when external VQA is unavailable."""
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        arr = np.asarray(image, dtype=np.float32)
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        brightness = (r + g + b) / 3.0
+        green_mask = (g > r * 1.08) & (g > b * 1.03) & (g > 45)
+        blue_mask = (b > r * 1.12) & (b > g * 1.02) & (b > 50)
+        bright_neutral_mask = ((brightness > 95) & ((np.max(arr, axis=2) - np.min(arr, axis=2)) < 35))
+        green_pct = float(green_mask.mean() * 100)
+        blue_pct = float(blue_mask.mean() * 100)
+        bright_pct = float(bright_neutral_mask.mean() * 100)
+        q = question.strip().lower()
+
+        if any(x in q for x in ["vegetation", "green", "forest", "plant", "crop", "agriculture"]):
+            answer = (f"Vegetation-like areas are visible in the image. Approximately {green_pct:.1f}% of pixels show green-dominant surface characteristics." if green_pct >= 8 else "No strong vegetation-dominant pattern is detected from the RGB image.")
+        elif any(x in q for x in ["water", "lake", "river", "sea", "ocean", "pond"]):
+            answer = (f"Water-like regions are detected in the image, covering approximately {blue_pct:.1f}% of pixels based on RGB color characteristics." if blue_pct >= 4 else "No strong water-like region is detected from the RGB image.")
+        elif any(x in q for x in ["building", "built", "urban", "city", "road", "construction"]):
+            answer = (f"Built-up or developed surface patterns may be present. Bright low-color-variation regions were detected in approximately {bright_pct:.1f}% of pixels." if bright_pct >= 8 else "The RGB image does not show a strong built-up surface signature using the deterministic fallback analysis.")
+        else:
+            surface = []
+            if green_pct >= 8: surface.append("vegetation-like areas")
+            if blue_pct >= 4: surface.append("water-like areas")
+            if bright_pct >= 8: surface.append("bright developed or bare-surface areas")
+            answer = ("The satellite image shows " + ", ".join(surface) + ". These observations are based on deterministic RGB image analysis." if surface else "The image contains visible land-surface patterns, but the requested feature cannot be determined reliably using the local fallback analysis.")
+
+        return {"success": True, "mode": "local-fallback", "provider": "local", "model": "SatQuery deterministic fallback", "question": question.strip(), "answer": answer, "image_width": image.width, "image_height": image.height}
+    except Exception as exc:
+        return {"success": False, "error": "Local VQA fallback failed.", "details": str(exc)}
+
+
 @app.post("/api/vqa")
-async def vqa(
-    image: UploadFile = File(...),
-    question: str = Form(...),
-):
-
+async def vqa(image: UploadFile = File(...), question: str = Form(...)):
     if not question.strip():
+        return {"success": False, "error": "Question cannot be empty."}
 
-        return {
-            "success": False,
-            "error": (
-                "Question cannot be empty."
-            ),
-        }
-
-
-    allowed = {
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".tif",
-        ".tiff",
-        ".jp2",
-        ".j2k",
-        ".nitf",
-    }
-
-
-    filename = (
-        image.filename
-        or "satellite"
-    )
-
-    ext = extension(
-        filename
-    )
-
-
+    allowed = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".jp2", ".j2k", ".nitf"}
+    filename = image.filename or "satellite"
+    ext = extension(filename)
     if ext not in allowed:
-
-        return {
-            "success": False,
-            "error": (
-                "Unsupported image format. "
-                "Use PNG, JPG/JPEG, GeoTIFF, "
-                "JP2/J2K or NITF."
-            ),
-        }
-
+        return {"success": False, "error": "Unsupported image format. Use PNG, JPG/JPEG, GeoTIFF, JP2/J2K or NITF."}
 
     image_bytes = await image.read()
-
-
     if not image_bytes:
-
-        return {
-            "success": False,
-            "error": (
-                "Uploaded image is empty."
-            ),
-        }
-
-
-    max_upload_size = (
-        50 * 1024 * 1024
-    )
-
-
-    if len(image_bytes) > max_upload_size:
-
-        return {
-            "success": False,
-            "error": (
-                "Maximum image size is 50 MB."
-            ),
-        }
-
+        return {"success": False, "error": "Uploaded image is empty."}
+    if len(image_bytes) > 50 * 1024 * 1024:
+        return {"success": False, "error": "Maximum image size is 50 MB."}
 
     try:
-
-        (
-            image_data_url,
-            width,
-            height,
-            ai_size,
-        ) = make_ai_image(
-            image_bytes,
-            filename
-        )
-
+        image_data_url, width, height, ai_size = make_ai_image(image_bytes, filename)
     except ValueError as exc:
-
-        return {
-            "success": False,
-            "error": str(exc)
-        }
-
+        return {"success": False, "error": str(exc)}
 
     if not HF_TOKEN:
+        return local_vqa_fallback(image_bytes, question)
 
-        return {
-            "success": True,
-            "mode": "demo",
-            "provider": "demo",
-            "question": question.strip(),
-            "answer": (
-                "Demo VQA response. Add HF_TOKEN "
-                "in backend/.env to enable live "
-                "satellite-image question answering."
-            ),
-            "image_width": width,
-            "image_height": height,
-        }
-
-
-    payload = {
-
-        "model": HF_MODEL,
-
-        "messages": [
-
-            {
-                "role": "user",
-
-                "content": [
-
-                    {
-                        "type": "text",
-
-                        "text": (
-                            "You are SatQuery AI, a "
-                            "satellite imagery analysis "
-                            "assistant.\n\n"
-
-                            "Analyze ONLY the provided "
-                            "satellite image.\n\n"
-
-                            "Answer the user's question "
-                            "using only information that "
-                            "is actually visible in the image.\n\n"
-
-                            "Do not invent objects, "
-                            "locations, buildings, roads, "
-                            "water bodies or other details.\n\n"
-
-                            "If something cannot be "
-                            "determined from the image, "
-                            "clearly say so.\n\n"
-
-                            "Give a concise and factual answer.\n\n"
-
-                            f"User question: "
-                            f"{question.strip()}"
-                        ),
-                    },
-
-                    {
-                        "type": "image_url",
-
-                        "image_url": {
-                            "url": image_data_url
-                        },
-                    },
-
-                ],
-            }
-
-        ],
-
-        "max_tokens": 600,
-    }
-
-
-    headers = {
-
-        "Authorization":
-            f"Bearer {HF_TOKEN}",
-
-        "Content-Type":
-            "application/json",
-
-        "Accept":
-            "application/json",
-    }
-
+    payload = {"model": HF_MODEL, "messages": [{"role": "user", "content": [{"type": "text", "text": "You are SatQuery AI, a satellite imagery analysis assistant. Analyze ONLY the provided satellite image. Answer the user's question using only information that is actually visible in the image. Do not invent objects, locations, buildings, roads, water bodies or other details. If something cannot be determined from the image, clearly say so. Give a concise and factual answer.\n\nUser question: " + question.strip()}, {"type": "image_url", "image_url": {"url": image_data_url}}]}], "max_tokens": 600}
+    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json", "Accept": "application/json"}
 
     try:
-
-        response = requests.post(
-            HF_URL,
-            headers=headers,
-            json=payload,
-            timeout=120,
-        )
-
-
-        print(
-            "HUGGING FACE VQA STATUS:",
-            response.status_code
-        )
-
-        print(
-            "HUGGING FACE VQA RESPONSE:",
-            response.text[:2000]
-        )
-
-
+        response = requests.post(HF_URL, headers=headers, json=payload, timeout=120)
+        print("HUGGING FACE VQA STATUS:", response.status_code)
+        print("HUGGING FACE VQA RESPONSE:", response.text[:2000])
         if response.status_code != 200:
-
-            try:
-                error_data = response.json()
-
-            except Exception:
-                error_data = response.text
-
-            return {
-                "success": False,
-                "error": (
-                    f"AI API error: "
-                    f"{response.status_code}"
-                ),
-                "details": error_data,
-            }
-
-
+            print("HF VQA unavailable. Using local fallback.")
+            return local_vqa_fallback(image_bytes, question)
         try:
             data = response.json()
-
         except ValueError:
-
-            return {
-                "success": False,
-                "error": (
-                    "AI returned invalid JSON."
-                ),
-                "details": response.text[:2000],
-            }
-
-
-        if (
-            "choices" not in data
-            or not data["choices"]
-        ):
-
-            return {
-                "success": False,
-                "error": (
-                    "AI returned an unexpected response."
-                ),
-                "details": data,
-            }
-
-
-        message = (
-            data["choices"][0]
-            .get(
-                "message",
-                {}
-            )
-        )
-
-
-        answer = (
-            message.get("content")
-            or
-            message.get(
-                "reasoning_content"
-            )
-            or ""
-        )
-
-
+            return local_vqa_fallback(image_bytes, question)
+        if "choices" not in data or not data["choices"]:
+            return local_vqa_fallback(image_bytes, question)
+        message = data["choices"][0].get("message", {})
+        answer = message.get("content") or message.get("reasoning_content") or ""
         if not answer:
-
-            return {
-                "success": False,
-                "error": (
-                    "AI response did not contain "
-                    "an answer."
-                ),
-                "details": data,
-            }
-
-
-        return {
-
-            "success": True,
-
-            "mode": "live",
-
-            "provider": "huggingface",
-
-            "model": HF_MODEL,
-
-            "question":
-                question.strip(),
-
-            "answer":
-                answer,
-
-            "image_width":
-                width,
-
-            "image_height":
-                height,
-
-            "ai_payload_kb":
-                round(
-                    ai_size / 1024,
-                    1
-                ),
-        }
-
-
-    except requests.RequestException as exc:
-
-        return {
-            "success": False,
-            "error": (
-                "Unable to connect to AI service."
-            ),
-            "details": str(exc),
-        }
-
-
+            return local_vqa_fallback(image_bytes, question)
+        return {"success": True, "mode": "live", "provider": "huggingface", "model": HF_MODEL, "question": question.strip(), "answer": answer, "image_width": width, "image_height": height, "ai_payload_kb": round(ai_size / 1024, 2)}
     except Exception as exc:
-
-        return {
-            "success": False,
-            "error": (
-                "Unexpected AI error."
-            ),
-            "details": str(exc),
-        }
+        print("HUGGING FACE VQA EXCEPTION:", str(exc))
+        return local_vqa_fallback(image_bytes, question)
 
 
 # ============================================================
