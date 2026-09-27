@@ -1291,17 +1291,40 @@ Use these numerical NDBI values together with the visible satellite image. Do no
       const combinedQuestion =
         `${userQuestion}${ndviEvidence}${ndwiEvidence}${ndbiEvidence}`;
 
-      // Phase 9C — HF credits are exhausted.
-      // Do not call the VQA endpoint, so no 402 request is generated.
-      // The rest of the satellite analysis remains fully available.
-      setAnswer({
-        success: false,
-        mode: "unavailable",
-        provider: "huggingface-unavailable",
-        answer:
-          "Satellite image question answering is temporarily unavailable because the AI inference credits are exhausted. " +
-          "NDVI, NDWI, NDBI and the deterministic satellite intelligence modules remain available.",
+      // =====================================================
+      // VQA — SEND THE IMAGE + ALL AVAILABLE EVIDENCE
+      // =====================================================
+      // The backend now handles HF failures with a local fallback.
+      // Keep the frontend responsible only for calling the VQA API
+      // and rendering the returned result.
+      const result = await askVQA({
+        file: selectedFile,
+        question: combinedQuestion,
       });
+
+      // If an older backend/provider still returns a credit error,
+      // keep the existing friendly UI instead of exposing raw API data.
+      const resultError = String(
+        result?.error || result?.details?.error || result?.message || ""
+      );
+
+      if (
+        result?.success === false &&
+        (resultError.includes("402") ||
+          resultError.toLowerCase().includes("payment required") ||
+          resultError.toLowerCase().includes("credits"))
+      ) {
+        setAnswer({
+          success: false,
+          mode: "unavailable",
+          provider: "huggingface-unavailable",
+          answer:
+            "Satellite image question answering is temporarily unavailable. " +
+            "NDVI, NDWI, NDBI and the deterministic satellite intelligence modules remain available.",
+        });
+      } else {
+        setAnswer(result);
+      }
     } catch (err) {
       const errorMessage =
         err?.message ||
@@ -1322,7 +1345,7 @@ Use these numerical NDBI values together with the visible satellite image. Do no
           mode: "unavailable",
           provider: "huggingface-unavailable",
           answer:
-            "Satellite image question answering is temporarily unavailable because the AI inference credits are exhausted. " +
+            "Satellite image question answering is temporarily unavailable. " +
             "The satellite image, NDVI, NDWI, NDBI, land intelligence, change detection and temporal analysis remain available.",
         });
         setError("");
