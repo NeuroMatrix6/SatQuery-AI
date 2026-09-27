@@ -500,7 +500,68 @@ export default function GeoLocation() {
                   ? 25
                   : 0;
 
-              return (
+              
+/* ===== Scroll Reveal Animation ===== */
+<style>{`
+  @keyframes geoScrollReveal {
+    from {
+      opacity: 0;
+      transform: translateY(42px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .geo-scroll-reveal {
+    opacity: 0;
+    transform: translateY(42px);
+    will-change: opacity, transform;
+  }
+
+  .geo-scroll-reveal.geo-scroll-visible {
+    animation: geoScrollReveal 0.7s cubic-bezier(.22,1,.36,1) both;
+  }
+
+  .geo-scroll-delay-1 { animation-delay: 0.08s; }
+  .geo-scroll-delay-2 { animation-delay: 0.16s; }
+  .geo-scroll-delay-3 { animation-delay: 0.24s; }
+  .geo-scroll-delay-4 { animation-delay: 0.32s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .geo-scroll-reveal,
+    .geo-scroll-reveal.geo-scroll-visible {
+      opacity: 1;
+      transform: none;
+      animation: none !important;
+    }
+  }
+`}</style>
+
+
+  // Reveal major sections smoothly as they enter the viewport.
+  useEffect(() => {
+    const nodes = document.querySelectorAll(".geo-scroll-reveal");
+    if (!nodes.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("geo-scroll-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -60px 0px" }
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, []);
+
+return (
                 bType +
                 bExact -
                 (aType +

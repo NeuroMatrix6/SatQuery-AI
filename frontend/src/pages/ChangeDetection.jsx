@@ -714,6 +714,79 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen bg-[#030712] text-white">
+      <style>{`
+        @keyframes cqFadeUp {
+          from { opacity: 0; transform: translateY(22px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes cqSlideLeft {
+          from { opacity: 0; transform: translateX(-28px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes cqSlideRight {
+          from { opacity: 0; transform: translateX(28px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes cqScaleIn {
+          from { opacity: 0; transform: scale(.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes cqScan {
+          0% { transform: translateY(-110%); opacity: 0; }
+          15% { opacity: .9; }
+          85% { opacity: .9; }
+          100% { transform: translateY(110%); opacity: 0; }
+        }
+        @keyframes cqGlow {
+          0%, 100% { box-shadow: 0 0 0 rgba(59,130,246,0); }
+          50% { box-shadow: 0 0 34px rgba(59,130,246,.18); }
+        }
+        @keyframes cqFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-5px); }
+        }
+        .cq-fade-up { animation: cqFadeUp .65s cubic-bezier(.22,1,.36,1) both; }
+        .cq-slide-left { animation: cqSlideLeft .7s cubic-bezier(.22,1,.36,1) both; }
+        .cq-slide-right { animation: cqSlideRight .7s cubic-bezier(.22,1,.36,1) both; }
+        .cq-scale-in { animation: cqScaleIn .55s cubic-bezier(.22,1,.36,1) both; }
+        .cq-change-map { animation: cqScaleIn .7s cubic-bezier(.22,1,.36,1) both; }
+        .cq-scan-line {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          overflow: hidden;
+        }
+        .cq-scan-line::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 0;
+          height: 2px;
+          background: linear-gradient(90deg, transparent, rgba(96,165,250,.9), transparent);
+          box-shadow: 0 0 18px rgba(96,165,250,.8);
+          animation: cqScan 2.8s ease-in-out infinite;
+        }
+        .cq-ready-glow { animation: cqGlow 2.4s ease-in-out infinite; }
+        .cq-float { animation: cqFloat 2.8s ease-in-out infinite; }
+        .cq-stagger > * {
+          animation: cqFadeUp .55s cubic-bezier(.22,1,.36,1) both;
+        }
+        .cq-stagger > *:nth-child(1) { animation-delay: .05s; }
+        .cq-stagger > *:nth-child(2) { animation-delay: .10s; }
+        .cq-stagger > *:nth-child(3) { animation-delay: .15s; }
+        .cq-stagger > *:nth-child(4) { animation-delay: .20s; }
+        .cq-stagger > *:nth-child(5) { animation-delay: .25s; }
+        .cq-stagger > *:nth-child(6) { animation-delay: .30s; }
+        @media (prefers-reduced-motion: reduce) {
+          .cq-fade-up, .cq-slide-left, .cq-slide-right, .cq-scale-in,
+          .cq-change-map, .cq-ready-glow, .cq-float, .cq-stagger > * {
+            animation: none !important;
+          }
+          .cq-scan-line::after { animation: none !important; }
+        }
+      `}</style>
+
       {/* BACKGROUND */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute left-[5%] top-[-150px] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[160px]" />
@@ -764,7 +837,7 @@ useEffect(() => {
       {/* MAIN */}
       <main className="relative z-10 mx-auto max-w-7xl px-6 py-12">
         {/* HEADER */}
-        <div className="mb-10">
+        <div className="mb-10 cq-fade-up">
           <div className="mb-4 flex items-center gap-2">
             <span className="h-2 w-2 animate-pulse rounded-full bg-purple-400" />
 
@@ -809,7 +882,8 @@ useEffect(() => {
 
         {/* BEFORE / AFTER */}
         <div className="grid gap-6 lg:grid-cols-2">
-          <ImageUploadCard
+          <div className="cq-slide-left">
+            <ImageUploadCard
             title="Before"
             subtitle="Original observation"
             date={beforeDate}
@@ -820,9 +894,11 @@ useEffect(() => {
             onUpload={handleUpload}
             onRemove={removeImage}
             accent="blue"
-          />
+            />
+          </div>
 
-          <ImageUploadCard
+          <div className="cq-slide-right">
+            <ImageUploadCard
             title="After"
             subtitle="Recent observation"
             date={afterDate}
@@ -833,7 +909,8 @@ useEffect(() => {
             onUpload={handleUpload}
             onRemove={removeImage}
             accent="blue"
-          />
+            />
+          </div>
         </div>
 
         {/* DEMO PAIR BUTTON */}
@@ -857,6 +934,8 @@ useEffect(() => {
               isComparing
             }
             className={`group rounded-2xl px-10 py-4 text-base font-semibold shadow-2xl transition-all duration-300 ${
+              beforeImage && afterImage && !isComparing ? "cq-ready-glow" : ""
+            } ${
               beforeImage && afterImage
                 ? "bg-blue-500 shadow-purple-500/30 hover:scale-105 hover:bg-purple-400"
                 : "cursor-not-allowed bg-gray-700 text-gray-500"
@@ -888,7 +967,7 @@ useEffect(() => {
 
         {/* RESULT */}
         {result && (
-          <section className="mt-12 overflow-hidden rounded-3xl border border-blue-500/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
+          <section className="mt-12 cq-fade-up overflow-hidden rounded-3xl border border-blue-500/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
             {/* RESULT HEADER */}
             <div className="flex flex-col justify-between gap-4 border-b border-white/10 px-6 py-6 md:flex-row md:items-center">
               <div>
@@ -909,7 +988,7 @@ useEffect(() => {
             {/* COMPARISON IMAGES */}
             <div className="grid gap-6 p-6 lg:grid-cols-2">
               {/* BEFORE */}
-              <div>
+              <div className="cq-slide-left">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-sm font-medium">
                     Before
@@ -930,7 +1009,7 @@ useEffect(() => {
               </div>
 
               {/* AFTER */}
-              <div>
+              <div className="cq-slide-right">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-sm font-medium">
                     After
@@ -975,12 +1054,13 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-2xl border border-blue-400/20 bg-black">
+              <div className="cq-change-map relative overflow-hidden rounded-2xl border border-blue-400/20 bg-black">
                 <img
                   src={result.image}
                   alt="Multi-category satellite change map"
                   className="max-h-[600px] w-full object-contain"
                 />
+                <div className="cq-scan-line" aria-hidden="true" />
               </div>
 
               {/* CATEGORY STATS */}
@@ -989,7 +1069,7 @@ useEffect(() => {
                   Change Categories
                 </p>
 
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="cq-stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <CategoryStat
                     icon="💧"
                     label="Water Bodies"
@@ -1078,7 +1158,7 @@ useEffect(() => {
             </div>
 
             {/* AI INTERPRETATION */}
-            <div className="border-t border-white/10 bg-blue-500/[0.04] p-6">
+            <div className="cq-fade-up border-t border-white/10 bg-blue-500/[0.04] p-6">
               <div className="flex items-start gap-4">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10 text-xl">
                   ✦
@@ -1148,7 +1228,7 @@ useEffect(() => {
             PHASE 7 — MULTISPECTRAL CHANGE INTELLIGENCE
         ====================================================== */}
         {(multispectralChangeResult || isMultispectralChangeAnalyzing || multispectralChangeError) && (
-          <section className="mt-8 overflow-hidden rounded-3xl border border-blue-400/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
+          <section className="mt-8 cq-fade-up overflow-hidden rounded-3xl border border-blue-400/20 bg-white/[0.03] shadow-2xl backdrop-blur-xl">
             <div className="border-b border-white/10 bg-cyan-500/[0.04] px-6 py-6">
               <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
@@ -1535,7 +1615,7 @@ function ImageUploadCard({
             `}
           />
 
-          <div className="relative text-5xl">
+          <div className="relative text-5xl cq-float">
             🛰️
           </div>
 
