@@ -1428,7 +1428,7 @@ export default function GeoLocation() {
   ======================================================= */
 
 
-  // Scroll reveal: animate each marked section once when it enters the viewport.
+  // Scroll reveal: also re-scan when async satellite results arrive.
   useEffect(() => {
     const nodes = document.querySelectorAll(".geo-scroll-reveal");
     if (!nodes.length) return;
@@ -1451,7 +1451,7 @@ export default function GeoLocation() {
     nodes.forEach((node) => observer.observe(node));
 
     return () => observer.disconnect();
-  }, []);
+  }, [satelliteResults.length]);
 
 
   return (
