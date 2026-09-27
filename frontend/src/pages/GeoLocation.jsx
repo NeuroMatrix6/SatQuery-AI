@@ -210,6 +210,33 @@ function MapInteraction({
    MAIN COMPONENT
 ========================================================= */
 
+
+const GEO_SCROLL_STYLES = `
+  @keyframes geoScrollReveal {
+    from { opacity: 0; transform: translateY(38px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .geo-scroll-reveal {
+    opacity: 0;
+    transform: translateY(38px);
+    will-change: opacity, transform;
+  }
+
+  .geo-scroll-visible {
+    animation: geoScrollReveal 0.7s cubic-bezier(.22,1,.36,1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .geo-scroll-reveal,
+    .geo-scroll-visible {
+      opacity: 1;
+      transform: none;
+      animation: none !important;
+    }
+  }
+`;
+
 export default function GeoLocation() {
   /* =======================================================
      LOCATION
@@ -500,68 +527,7 @@ export default function GeoLocation() {
                   ? 25
                   : 0;
 
-              
-/* ===== Scroll Reveal Animation ===== */
-<style>{`
-  @keyframes geoScrollReveal {
-    from {
-      opacity: 0;
-      transform: translateY(42px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .geo-scroll-reveal {
-    opacity: 0;
-    transform: translateY(42px);
-    will-change: opacity, transform;
-  }
-
-  .geo-scroll-reveal.geo-scroll-visible {
-    animation: geoScrollReveal 0.7s cubic-bezier(.22,1,.36,1) both;
-  }
-
-  .geo-scroll-delay-1 { animation-delay: 0.08s; }
-  .geo-scroll-delay-2 { animation-delay: 0.16s; }
-  .geo-scroll-delay-3 { animation-delay: 0.24s; }
-  .geo-scroll-delay-4 { animation-delay: 0.32s; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .geo-scroll-reveal,
-    .geo-scroll-reveal.geo-scroll-visible {
-      opacity: 1;
-      transform: none;
-      animation: none !important;
-    }
-  }
-`}</style>
-
-
-  // Reveal major sections smoothly as they enter the viewport.
-  useEffect(() => {
-    const nodes = document.querySelectorAll(".geo-scroll-reveal");
-    if (!nodes.length) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("geo-scroll-visible");
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.12, rootMargin: "0px 0px -60px 0px" }
-    );
-
-    nodes.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
-  }, []);
-
-return (
+              return (
                 bType +
                 bExact -
                 (aType +
@@ -1461,8 +1427,36 @@ return (
      UI
   ======================================================= */
 
+
+  // Scroll reveal: animate each marked section once when it enters the viewport.
+  useEffect(() => {
+    const nodes = document.querySelectorAll(".geo-scroll-reveal");
+    if (!nodes.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("geo-scroll-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      {
+        threshold: 0.12,
+        rootMargin: "0px 0px -50px 0px",
+      }
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+
+    return () => observer.disconnect();
+  }, []);
+
+
   return (
     <div className="min-h-screen bg-[#030712] text-white">
+      <style>{GEO_SCROLL_STYLES}</style>
 
       {/* =================================================
           BACKGROUND
@@ -1531,7 +1525,7 @@ return (
             HEADER
         ================================================== */}
 
-        <div className="mb-8">
+        <div className="geo-scroll-reveal mb-8">
 
           <div className="mb-4 flex items-center gap-2">
 
@@ -1584,7 +1578,7 @@ return (
             SEARCH
         ================================================== */}
 
-        <div className="relative z-[2000] mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-xl">
+        <div className="geo-scroll-reveal relative z-[2000] mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-xl">
 
           <div className="flex flex-col gap-3 md:flex-row">
 
@@ -1741,7 +1735,7 @@ return (
             MAP + SETUP
         ================================================== */}
 
-        <div className="grid items-start gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="geo-scroll-reveal grid items-start gap-6 lg:grid-cols-[1fr_360px]">
 
           {/* =================================================
               MAP
@@ -2078,7 +2072,7 @@ return (
               ANALYSIS SETUP
           ================================================== */}
 
-          <div className="rounded-3xl border border-blue-500/20 bg-gradient-to-b from-blue-500/[0.08] to-transparent p-5 backdrop-blur-xl md:p-6">
+          <div className="geo-scroll-reveal rounded-3xl border border-blue-500/20 bg-gradient-to-b from-blue-500/[0.08] to-transparent p-5 backdrop-blur-xl md:p-6">
 
             {/* HEADER */}
 
@@ -2653,7 +2647,7 @@ return (
         {satelliteResults.length >
           0 && (
 
-          <section className="mt-8">
+          <section className="geo-scroll-reveal mt-8">
 
             <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-end">
 
@@ -3310,7 +3304,7 @@ return (
           !satelliteError &&
           isReadyForSatelliteData && (
 
-          <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center">
+          <div className="geo-scroll-reveal mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center">
 
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-2xl">
               🛰️
